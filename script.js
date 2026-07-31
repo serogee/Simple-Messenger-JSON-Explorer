@@ -177,7 +177,6 @@ function setupRadioButtons(participants) {
 
 function setupCheckboxListeners() {
     const checkboxConfig = [
-        { id: "showTime", class: ".timestamp" },
         { id: "showMyName", class: ".from-me .sender-name" },
         { id: "showTheirName", class: ".from-them .sender-name" },
         { id: "showReacts", class: ".reaction" }
@@ -206,6 +205,97 @@ function setupCheckboxListeners() {
     });
 }
 
+function getMessageText(msg) {
+    return String(msg?.text || msg?.content || "").trim();
+}
+
+function getMessageMediaItems(msg) {
+    return [].concat(
+        msg?.media || [],
+        msg?.photos || [],
+        msg?.videos || [],
+        msg?.audio || [],
+        msg?.audio_files || [],
+        msg?.gifs || []
+    );
+}
+
+function isReactionNoticeMessage(msg) {
+    const text = getMessageText(msg);
+    if (!text) return false;
+    if (getMessageMediaItems(msg).length) return false;
+    return /^(?:.+?\s+)?reacted\s+.+?\s+to your message(?:[.:].*)?$/i.test(text);
+}
+
+function parseReactionNotice(msg) {
+    if (!isReactionNoticeMessage(msg)) return null;
+    const match = getMessageText(msg).match(/^(?:(.+?)\s+)?reacted\s+(.+?)\s+to your message(?:[.:].*)?$/i);
+    if (!match) return null;
+
+    return {
+        actor: (match[1] || msg.senderName || msg.sender_name || "").trim(),
+        reaction: (match[2] || "").trim(),
+        timestamp: msg.timestamp || msg.timestamp_ms || 0
+    };
+}
+
+function normalizeReactionValue(value) {
+    return String(value || "")
+        .normalize("NFC")
+        .replace(/[\uFE0E\uFE0F]/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+}
+
+function getReactionTimestamp(reaction) {
+    return reaction?.timestamp || reaction?.timestamp_ms || reaction?.__timestamp || 0;
+}
+
+function enrichReactionTimestamps(messages) {
+    if (!Array.isArray(messages)) return;
+
+    messages.forEach((msg, index) => {
+        const notice = parseReactionNotice(msg);
+        if (!notice || !notice.timestamp || !notice.reaction) return;
+
+        for (let i = index - 1; i >= 0; i--) {
+            const target = messages[i];
+            if (!target || isReactionNoticeMessage(target) || !Array.isArray(target.reactions)) continue;
+
+            const noticeActor = normalizeReactionValue(notice.actor);
+            const noticeReaction = normalizeReactionValue(notice.reaction);
+            const match = target.reactions.find(r => {
+                const sameActor = !noticeActor || normalizeReactionValue(r.actor) === noticeActor;
+                return sameActor && normalizeReactionValue(r.reaction) === noticeReaction && !getReactionTimestamp(r);
+            }) || target.reactions.find(r => {
+                return normalizeReactionValue(r.reaction) === noticeReaction && !getReactionTimestamp(r);
+            });
+
+            if (match) {
+                match.__timestamp = notice.timestamp;
+                break;
+            }
+        }
+    });
+}
+
+function formatReaction(reaction) {
+    const actor = escapeHtml(reaction.actor || "");
+    const value = escapeHtml(reaction.reaction || "");
+    const timestamp = getReactionTimestamp(reaction);
+    const timeText = timestamp ? new Date(timestamp).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
+    const attrs = timeText ? ` title="${escapeHtml(timeText)}" data-reaction-time="${escapeHtml(timeText)}"` : "";
+    return `<span class="reaction-item"${attrs}>${actor}: ${value}</span>`;
+}
+
+function findPreviousVisibleMessageIndex(messages, fromIndex) {
+    for (let i = fromIndex - 1; i >= 0; i--) {
+        if (!isReactionNoticeMessage(messages[i])) return i;
+    }
+    return -1;
+}
+
 function renderMessages(data, selectedValue) {
     const chatContainer = document.getElementById("chat");
     const loading = document.getElementById("loading");
@@ -220,6 +310,7 @@ function renderMessages(data, selectedValue) {
     
     renderedMessages.clear();
     chatContainer.innerHTML = "";
+    enrichReactionTimestamps(data.messages);
     
     if (!data.messages.length) {
         loading.innerHTML = "No messages";
@@ -394,18 +485,10 @@ function highlightText(original, query) {
 
 function createMessageHTML(msg, highlightQuery) {
     const sender = msg.senderName || msg.sender_name || "Unknown";
-    const rawText = msg.text || msg.content || "";
+    const rawText = getMessageText(msg);
     const text = highlightQuery ? highlightText(String(rawText), highlightQuery) : escapeHtml(String(rawText));
     const timestamp = msg.timestamp || msg.timestamp_ms || 0;
-    // Combine all possible media arrays
-    const mediaItems = [].concat(
-        msg.media || [],
-        msg.photos || [],
-        msg.videos || [],
-        msg.audio || [],
-        msg.audio_files || [], // Add support for audio_files
-        msg.gifs || []
-    );
+    const mediaItems = getMessageMediaItems(msg);
 
     return `
         <div class="sender-name">${escapeHtml(sender)}</div>
@@ -434,8 +517,8 @@ function createMessageHTML(msg, highlightQuery) {
                 }
                 return `[ Media not found ]`;
             }).join("")}
-            ${msg.reactions?.length ? `<div class="reaction">${msg.reactions.map(r => `${escapeHtml(r.actor)}: ${escapeHtml(r.reaction)}`).join(", ")}</div>` : ""}
-            <div class="timestamp">${new Date(timestamp).toLocaleString()}</div>
+            ${msg.reactions?.length ? `<div class="reaction">${msg.reactions.map(formatReaction).join(", ")}</div>` : ""}
+            <div class="msg-timestamp">${new Date(timestamp).toLocaleString([], {dateStyle: 'short', timeStyle: 'short'})}</div>
         </div>
     `;
 }
@@ -478,6 +561,7 @@ function buildSearchIndex(messages) {
     const idx = [];
     for (let i = 0; i < messages.length; i++) {
         const m = messages[i];
+        if (isReactionNoticeMessage(m)) continue;
         const parts = [];
         if (m.text) parts.push(typeof m.text === 'string' ? m.text : (m.content || ''));
         if (m.content) parts.push(m.content);
@@ -703,7 +787,7 @@ function updateHighlightsAcrossDOM(query) {
     // remove media previews and reactions/timestamp to preserve them
     // note: do NOT remove <video> separately because videos are wrapped in .media-preview anchors;
     // removing both the anchor and video then re-inserting both causes duplication.
-    const mediaEls = clone.querySelectorAll('.media-preview, audio, .preview, .reaction, .timestamp');
+    const mediaEls = clone.querySelectorAll('.media-preview, audio, .preview, .reaction, .msg-timestamp');
         mediaEls.forEach(n => n.remove());
         // remove strong tags
         const strongs = clone.querySelectorAll('strong');
@@ -721,7 +805,7 @@ function updateHighlightsAcrossDOM(query) {
         // Collect only top-level media containers (exclude inner .preview img to avoid duplication)
         const seen = new Set();
         // collect only top-level media containers (anchors .media-preview) and audio/reaction/timestamp
-        originalContent.querySelectorAll('.media-preview, audio, .reaction, .timestamp').forEach(n => {
+        originalContent.querySelectorAll('.media-preview, audio, .reaction, .msg-timestamp').forEach(n => {
             const html = n.outerHTML;
             if (!seen.has(html)) {
                 seen.add(html);
@@ -764,6 +848,28 @@ function renderChunk(chunkIndex, messages, selectedValue) {
     const highlightQuery = (searchInput && searchInput.value) ? searchInput.value : '';
     messages.forEach((msg, localIdx) => {
         const globalIdx = chunkIndex * CHUNK_SIZE + localIdx;
+        if (isReactionNoticeMessage(msg)) return;
+        
+        let showSeparator = false;
+        if (globalIdx === 0) {
+            showSeparator = true;
+        } else {
+            const prevIdx = findPreviousVisibleMessageIndex(window.currentChatData.messages, globalIdx);
+            const prevMsg = prevIdx >= 0 ? window.currentChatData.messages[prevIdx] : null;
+            const prevTime = prevMsg ? (prevMsg.timestamp || prevMsg.timestamp_ms || 0) : 0;
+            const currTime = msg.timestamp || msg.timestamp_ms || 0;
+            if (!prevMsg || Math.abs(currTime - prevTime) > 10 * 60 * 1000) {
+                showSeparator = true;
+            }
+        }
+        if (showSeparator) {
+            const currTime = msg.timestamp || msg.timestamp_ms || 0;
+            const sep = document.createElement("div");
+            sep.className = "time-separator";
+            sep.innerText = new Date(currTime).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            chunkContainer.appendChild(sep);
+        }
+
         const div = document.createElement("div");
         const sender = msg.senderName || msg.sender_name || "Unknown";
         div.classList.add("message", sender === selectedValue ? "from-me" : "from-them");
@@ -775,7 +881,7 @@ function renderChunk(chunkIndex, messages, selectedValue) {
     });
 
     renderedMessages.set(chunkIndex, true);
-    ["showTime", "showMyName", "showTheirName", "showReacts"].forEach(id => {
+    ["showMyName", "showTheirName", "showReacts"].forEach(id => {
         document.getElementById(id).dispatchEvent(new Event("change"));
     });
 }
@@ -893,6 +999,8 @@ darkModeToggle?.addEventListener('change', (e) => { setDarkMode(e.target.checked
 try {
     const pref = storageGet('darkMode');
     if (pref === '1') setDarkMode(true, false);
+    else if (pref === '0') setDarkMode(false, false);
+    else setDarkMode(true, false);
 } catch(e) {}
 
 // ------------------ Trust / Privacy modal logic ------------------
@@ -1022,7 +1130,7 @@ async function buildChatPdf(data, selectedPerspective) {
     if (!h2c) throw new Error('html2canvas not loaded');
 
     const threadName = data.threadName || data.title || data.threadPath || 'Untitled';
-    const messages = Array.isArray(data.messages) ? data.messages : [];
+    const messages = (Array.isArray(data.messages) ? data.messages : []).filter(msg => !isReactionNoticeMessage(msg));
 
     const chatEl = document.getElementById('chat');
     const chatContainerEl = document.querySelector('.chat-container');
@@ -1080,7 +1188,6 @@ async function buildChatPdf(data, selectedPerspective) {
 
     const showMyName = !!document.getElementById('showMyName')?.checked;
     const showTheirName = !!document.getElementById('showTheirName')?.checked;
-    const showTime = !!document.getElementById('showTime')?.checked;
     const showReacts = !!document.getElementById('showReacts')?.checked;
 
     const total = messages.length;
@@ -1105,7 +1212,6 @@ async function buildChatPdf(data, selectedPerspective) {
 
         // Apply checkbox visibility like in UI
         try {
-            if (!showTime) div.querySelectorAll('.timestamp').forEach(el => (el.style.display = 'none'));
             if (!showReacts) div.querySelectorAll('.reaction').forEach(el => (el.style.display = 'none'));
             if (fromMe && !showMyName) div.querySelectorAll('.sender-name').forEach(el => (el.style.display = 'none'));
             if (!fromMe && !showTheirName) div.querySelectorAll('.sender-name').forEach(el => (el.style.display = 'none'));
