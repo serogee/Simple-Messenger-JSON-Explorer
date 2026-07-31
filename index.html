@@ -32,12 +32,12 @@
             </div>
             <hr>
             <div class="settings">
-                <small>Select a Messenger JSON file to view</small>
-                <input type="file" id="fileInput" accept=".json">
+                <small>Select one or more Messenger JSON files to view</small>
+                <input type="file" id="fileInput" accept=".json" multiple>
                 <hr>
-                <small>Allow access to MEDIA folder</small>
+                <small>Optional: allow access to a separate MEDIA folder</small>
                 <input type="file" id="mediaFolder" webkitdirectory directory>
-                <small id="tips">To view images or videos, click the button and select the folder containing them.</small>
+                <small id="tips">Select the media folder separately if you want images, videos, or audio to display.</small>
                 <!-- Display Options -->
                 <div class="options">
                     <hr>
@@ -59,6 +59,10 @@
                             <input type="checkbox" id="showReacts" checked>
                             Show reactions
                         </label>
+                        <label>
+                            <input type="checkbox" id="autoCollapseDateNav" checked>
+                            Auto-collapse date navigation
+                        </label>
                     </form>
 
                     <hr>
@@ -76,7 +80,7 @@
                     <strong>Search messages</strong>
                     <div class="search-controls">
                         <input type="search" id="searchInput"
-                            placeholder="(supports fuzzy, no-diacritics)">
+                            placeholder="Exact phrase search">
                         <button id="searchBtn">Search</button>
                         <button id="clearSearchBtn" type="button">Clear</button>
                     </div>
@@ -116,9 +120,26 @@
 
         <!-- Chat Section -->
         <div class="chat-container">
-            <h3>
-                Conversation: <span id="threadName">unknown</span>
-            </h3>
+            <div class="chat-header">
+                <h3>
+                    Conversation: <span id="threadName">unknown</span>
+                </h3>
+                <div id="dateNavControls" class="date-nav-controls" aria-hidden="true">
+                    <button type="button" id="dateNavToggle" class="date-nav-current-box" aria-label="Toggle date navigation" aria-expanded="true">
+                        <div id="dateNavCurrent" class="date-nav-current"></div>
+                    </button>
+                    <div class="date-nav-scale" role="group" aria-label="Date navigation scale">
+                        <button type="button" class="active" data-date-scale="month">Month</button>
+                        <button type="button" data-date-scale="week">Week</button>
+                        <button type="button" data-date-scale="day">Day</button>
+                    </div>
+                    <div class="date-nav-steps" role="group" aria-label="Move through dates">
+                        <button type="button" id="dateNavPrev" aria-label="Previous date">&lt;</button>
+                        <button type="button" id="dateNavNext" aria-label="Next date">&gt;</button>
+                    </div>
+                </div>
+                <div id="dateNavTrack" class="date-nav-track" aria-label="Conversation dates"></div>
+            </div>
             <div id="line"></div>
             <div id="chat"></div>
             <div id="loading">No data available</div>

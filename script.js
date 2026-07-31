@@ -5,6 +5,9 @@ let currentJsonFileName = null;
 let currentJsonFileSize = null;
 let currentJsonFileModified = null;
 const CHUNK_SIZE = 50;
+const DATE_NAV_SYNC_LOCK_MS = 900;
+const DATE_NAV_ACTIVE_LINE_MIN_PX = 120;
+const DATE_NAV_ACTIVE_LINE_RATIO = 0.25;
 let renderedMessages = new Map();
 let observer = null;
 
@@ -13,6 +16,18 @@ let __pdfState = {
     cancel: false,
     blobUrl: null,
     fileName: null
+};
+
+let __dateNavState = {
+    bucketsByScale: { month: [], week: [], day: [] },
+    scale: 'month',
+    activeKey: null,
+    scrollTimer: null,
+    sliderTimer: null,
+    headerHover: false,
+    autoCollapse: true,
+    collapsed: false,
+    syncing: false
 };
 
 // Storage wrapper: namespace keys and fallback to cookies if localStorage unavailable
@@ -63,13 +78,22 @@ function sanitizeFileName(name) {
         .slice(0, 140) || 'conversation';
 }
 
-function handleFileUpload(event) {
-    const file = event.target.files[0];
-    if (!file) return;
+async function handleFileUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const jsonFiles = getOrderedMessageFiles(files);
+    if (!jsonFiles.length) {
+        alert("No Messenger JSON files found in that selection.");
+        event.target.value = "";
+        return;
+    }
 
     // If a different file (by name, size or modified time) is selected, clear previous search index.
     // Do NOT clear uploaded media here so a single uploaded media folder can be reused across multiple JSON files.
-    if (currentJsonFileName && (currentJsonFileName !== file.name || currentJsonFileSize !== file.size || currentJsonFileModified !== file.lastModified)) {
+    const selectionName = getJsonSelectionName(jsonFiles, files);
+    const selectionSize = jsonFiles.reduce((sum, file) => sum + file.size, 0);
+    const selectionModified = Math.max(...jsonFiles.map(file => file.lastModified || 0));
+    if (currentJsonFileName && (currentJsonFileName !== selectionName || currentJsonFileSize !== selectionSize || currentJsonFileModified !== selectionModified)) {
         try { __searchIndex = null; } catch(e){}
         try { if (searchInput) searchInput.value = ''; } catch(e){}
         try { if (searchResultsEl) searchResultsEl.innerHTML = ''; } catch(e){}
@@ -82,9 +106,9 @@ function handleFileUpload(event) {
         } catch(e){}
     }
 
-    currentJsonFileName = file.name;
-    currentJsonFileSize = file.size;
-    currentJsonFileModified = file.lastModified;
+    currentJsonFileName = selectionName;
+    currentJsonFileSize = selectionSize;
+    currentJsonFileModified = selectionModified;
 
     const options = document.getElementsByClassName("options")[0];
     const loading = document.getElementById("loading");
@@ -96,32 +120,439 @@ function handleFileUpload(event) {
     chatContainer.scrollTop = 0;
     chatContainer.innerHTML = "";
 
-    const reader = new FileReader();
-    reader.onload = (e) => processFileContent(e.target.result);
-    reader.readAsText(file, 'utf-8');
-}
-
-function processFileContent(content) {
     try {
-        let data;
-        const isThreadPathFormat = content.includes('"thread_path"');
-
-        if (isThreadPathFormat) {
-            const replaced = content.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (match, p1, p2) => {
-                const code = p1 ? parseInt(p1, 16) : parseInt(p2, 16);
-                return String.fromCharCode(code);
-            });
-            const decoded = decodeURIComponent(escape(replaced));
-            data = JSON.parse(decoded);
-            data.messages = data.messages.reverse();
-        } else {
-            data = JSON.parse(content);
+        const data = await loadJsonFiles(jsonFiles);
+        const mediaCandidates = getMediaCandidateFiles(files);
+        const isFolderSelection = files.some(file => file.webkitRelativePath);
+        if (isFolderSelection || mediaCandidates.length) {
+            loading.innerHTML = `Processing media (${mediaCandidates.length} files)...`;
+            await processMediaFiles(mediaCandidates);
         }
         setupChatInterface(data);
     } catch (error) {
+        console.error(error);
         alert("Invalid JSON file!");
+        loading.style.display = "none";
     }
 }
+
+function getJsonSelectionName(jsonFiles, allFiles = jsonFiles) {
+    const firstPath = (allFiles[0]?.webkitRelativePath || jsonFiles[0]?.webkitRelativePath || "").split(/[\\\/]/)[0];
+    if (firstPath && allFiles.length > 1) return `${firstPath} (${jsonFiles.length} JSON files)`;
+    if (jsonFiles.length === 1) return jsonFiles[0].name;
+    return firstPath ? `${firstPath} (${jsonFiles.length} JSON files)` : `${jsonFiles.length} JSON files`;
+}
+
+function isJsonFile(file) {
+    return /\.json$/i.test(file.name);
+}
+
+function getMediaCandidateFiles(files) {
+    return files.filter(file => !isJsonFile(file) && getMediaType(file.name) !== "unknown");
+}
+
+function getMessageFileNumber(file) {
+    const path = file.webkitRelativePath || file.name;
+    const match = path.match(/(?:^|[\\\/])message_(\d+)\.json$/i);
+    return match ? Number(match[1]) : Number.POSITIVE_INFINITY;
+}
+
+function getOrderedMessageFiles(files) {
+    const jsonFiles = files.filter(isJsonFile);
+    const messageFiles = jsonFiles.filter(file => Number.isFinite(getMessageFileNumber(file)));
+    const selected = messageFiles.length ? messageFiles : jsonFiles;
+    return selected.sort((a, b) => {
+        const numberA = getMessageFileNumber(a);
+        const numberB = getMessageFileNumber(b);
+        if (Number.isFinite(numberA) && Number.isFinite(numberB) && numberA !== numberB) {
+            return numberB - numberA;
+        }
+        return (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, undefined, { numeric: true });
+    });
+}
+
+async function loadJsonFiles(files) {
+    const orderedFiles = getOrderedMessageFiles(files);
+    if (!orderedFiles.length) throw new Error("No JSON files found");
+
+    const parsedFiles = [];
+    for (const file of orderedFiles) {
+        parsedFiles.push(parseMessengerJsonContent(await file.text()));
+    }
+
+    return normalizeMessengerData(mergeMessengerData(parsedFiles));
+}
+
+function parseMessengerJsonContent(content) {
+    const isThreadPathFormat = content.includes('"thread_path"');
+
+    if (isThreadPathFormat) {
+        const replaced = content.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (match, p1, p2) => {
+            const code = p1 ? parseInt(p1, 16) : parseInt(p2, 16);
+            return String.fromCharCode(code);
+        });
+        const decoded = decodeURIComponent(escape(replaced));
+        const data = JSON.parse(decoded);
+        data.messages = (data.messages || []).reverse();
+        return data;
+    }
+
+    return JSON.parse(content);
+}
+
+function mergeMessengerData(dataFiles) {
+    const base = { ...dataFiles[0] };
+    base.messages = dataFiles.flatMap(data => Array.isArray(data.messages) ? data.messages : []);
+
+    const participantMap = new Map();
+    dataFiles.forEach(data => {
+        (data.participants || []).forEach(participant => {
+            const name = typeof participant === 'string' ? participant : participant.name;
+            if (name && !participantMap.has(name)) participantMap.set(name, participant);
+        });
+    });
+    base.participants = Array.from(participantMap.values());
+
+    return base;
+}
+
+function getMessageTimestamp(msg) {
+    const timestamp = Number(msg?.timestamp_ms ?? msg?.timestamp ?? 0);
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+}
+
+function normalizeMessengerData(data) {
+    if (!Array.isArray(data.messages)) {
+        data.messages = [];
+        return data;
+    }
+
+    data.messages = data.messages
+        .map((msg, index) => ({ msg, index, timestamp: getMessageTimestamp(msg) }))
+        .sort((a, b) => {
+            if (a.timestamp === null && b.timestamp === null) return a.index - b.index;
+            if (a.timestamp === null) return 1;
+            if (b.timestamp === null) return -1;
+            return (a.timestamp - b.timestamp) || (a.index - b.index);
+        })
+        .map(item => item.msg);
+
+    return data;
+}
+
+function padDatePart(value) {
+    return String(value).padStart(2, '0');
+}
+
+function getLocalDateKey(date) {
+    return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+}
+
+function getLocalMonthKey(date) {
+    return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}`;
+}
+
+function getWeekStartDate(date) {
+    const weekStart = new Date(date);
+    weekStart.setHours(0, 0, 0, 0);
+    const mondayOffset = (weekStart.getDay() + 6) % 7;
+    weekStart.setDate(weekStart.getDate() - mondayOffset);
+    return weekStart;
+}
+
+function getBucketLabel(scale, timestamp) {
+    const date = new Date(timestamp);
+    if (scale === 'month') {
+        return date.toLocaleDateString([], { month: 'short', year: 'numeric' });
+    }
+    if (scale === 'week') {
+        const start = getWeekStartDate(date);
+        const end = new Date(start);
+        end.setDate(start.getDate() + 6);
+        const startText = start.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const endText = end.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        return `${startText}-${endText}`;
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function getBucketKey(scale, timestamp) {
+    const date = new Date(timestamp);
+    if (scale === 'month') return getLocalMonthKey(date);
+    if (scale === 'week') return getLocalDateKey(getWeekStartDate(date));
+    return getLocalDateKey(date);
+}
+
+function buildDateBuckets(messages) {
+    const bucketsByScale = { month: new Map(), week: new Map(), day: new Map() };
+
+    messages.forEach((msg, index) => {
+        if (isReactionNoticeMessage(msg)) return;
+        const timestamp = getMessageTimestamp(msg);
+        if (timestamp === null) return;
+
+        ['month', 'week', 'day'].forEach(scale => {
+            const key = getBucketKey(scale, timestamp);
+            if (!bucketsByScale[scale].has(key)) {
+                bucketsByScale[scale].set(key, {
+                    key,
+                    index,
+                    timestamp,
+                    count: 0,
+                    label: getBucketLabel(scale, timestamp)
+                });
+            }
+            bucketsByScale[scale].get(key).count += 1;
+        });
+    });
+
+    return {
+        month: Array.from(bucketsByScale.month.values()),
+        week: Array.from(bucketsByScale.week.values()),
+        day: Array.from(bucketsByScale.day.values())
+    };
+}
+
+function setupDateNavigator(messages) {
+    const controls = document.getElementById('dateNavControls');
+    if (!controls) return;
+
+    __dateNavState.bucketsByScale = buildDateBuckets(messages || []);
+    __dateNavState.scale = 'month';
+    __dateNavState.activeKey = null;
+    applyDateNavigatorCollapseMode();
+
+    const hasDates = Object.values(__dateNavState.bucketsByScale).some(buckets => buckets.length);
+    controls.classList.toggle('active', hasDates);
+    controls.setAttribute('aria-hidden', hasDates ? 'false' : 'true');
+    renderDateNavigator();
+}
+
+function applyDateNavigatorCollapseMode() {
+    const header = document.querySelector('.chat-header');
+    const toggle = document.getElementById('dateNavToggle');
+    if (!header) return;
+
+    header.classList.toggle('date-nav-auto', __dateNavState.autoCollapse);
+    header.classList.toggle('date-nav-collapsed', !__dateNavState.autoCollapse && __dateNavState.collapsed);
+    if (toggle) {
+        toggle.disabled = __dateNavState.autoCollapse;
+        toggle.setAttribute('aria-expanded', String(!__dateNavState.collapsed || __dateNavState.autoCollapse));
+    }
+}
+
+function renderDateNavigator() {
+    const controls = document.getElementById('dateNavControls');
+    const track = document.getElementById('dateNavTrack');
+    const current = document.getElementById('dateNavCurrent');
+    if (!controls || !track || !current) return;
+
+    const scale = __dateNavState.scale;
+    const buckets = __dateNavState.bucketsByScale[scale] || [];
+    const maxCount = Math.max(1, ...buckets.map(bucket => bucket.count));
+
+    document.querySelectorAll('[data-date-scale]').forEach(button => {
+        button.classList.toggle('active', button.dataset.dateScale === scale);
+    });
+
+    track.innerHTML = '';
+    track.classList.toggle('slider-mode', scale !== 'month');
+
+    if (scale !== 'month') {
+        renderDateSlider(track, buckets);
+        if (!buckets.length) {
+            current.innerText = '';
+            updateDateStepButtons(-1, 0);
+            return;
+        }
+
+        const active = buckets.find(bucket => bucket.key === __dateNavState.activeKey) || buckets[0];
+        setActiveDateBucket(active.key, active.label);
+        return;
+    }
+
+    buckets.forEach(bucket => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'date-nav-item';
+        button.dataset.dateKey = bucket.key;
+        button.dataset.msgIndex = bucket.index;
+        button.title = `${bucket.label} - ${bucket.count} messages`;
+        button.innerHTML = `
+            <span class="date-nav-label">${escapeHtml(bucket.label)}</span>
+            <span class="date-nav-density" aria-hidden="true">
+                <span style="width:${Math.max(8, Math.round((bucket.count / maxCount) * 100))}%"></span>
+            </span>
+        `;
+        button.addEventListener('click', async () => {
+            __dateNavState.syncing = true;
+            setActiveDateBucket(bucket.key, bucket.label);
+            await jumpToMessage(bucket.index);
+            setTimeout(() => { __dateNavState.syncing = false; }, DATE_NAV_SYNC_LOCK_MS);
+        });
+        track.appendChild(button);
+    });
+
+    if (!buckets.length) {
+        current.innerText = '';
+        updateDateStepButtons(-1, 0);
+        return;
+    }
+
+    const active = buckets.find(bucket => bucket.key === __dateNavState.activeKey) || buckets[0];
+    setActiveDateBucket(active.key, active.label);
+}
+
+function renderDateSlider(track, buckets) {
+    const selectedIndex = Math.max(0, buckets.findIndex(bucket => bucket.key === __dateNavState.activeKey));
+    const sliderIndex = selectedIndex >= 0 ? selectedIndex : 0;
+    const firstLabel = buckets[0]?.label || '';
+    const lastLabel = buckets[buckets.length - 1]?.label || '';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'date-nav-slider-wrap';
+    wrap.innerHTML = `
+        <input id="dateNavSlider" class="date-nav-slider" type="range" min="0" max="${Math.max(0, buckets.length - 1)}" value="${sliderIndex}" step="1" ${buckets.length <= 1 ? 'disabled' : ''}>
+        <div class="date-nav-slider-labels">
+            <span>${escapeHtml(firstLabel)}</span>
+            <span>${escapeHtml(lastLabel)}</span>
+        </div>
+        <div id="dateNavSliderMeta" class="date-nav-slider-meta"></div>
+    `;
+    track.appendChild(wrap);
+
+    const slider = wrap.querySelector('#dateNavSlider');
+    slider.addEventListener('input', () => {
+        const bucket = buckets[Number(slider.value)];
+        if (!bucket) return;
+        setActiveDateBucket(bucket.key, bucket.label);
+        clearTimeout(__dateNavState.sliderTimer);
+        __dateNavState.sliderTimer = setTimeout(async () => {
+            __dateNavState.syncing = true;
+            await jumpToMessage(bucket.index);
+            setTimeout(() => { __dateNavState.syncing = false; }, DATE_NAV_SYNC_LOCK_MS);
+        }, 120);
+    });
+}
+
+async function stepDateBucket(direction) {
+    const scale = __dateNavState.scale;
+    const buckets = __dateNavState.bucketsByScale[scale] || [];
+    if (!buckets.length) return;
+
+    const currentIndex = buckets.findIndex(bucket => bucket.key === __dateNavState.activeKey);
+    const fallbackIndex = direction > 0 ? -1 : buckets.length;
+    const nextIndex = Math.min(buckets.length - 1, Math.max(0, (currentIndex >= 0 ? currentIndex : fallbackIndex) + direction));
+    const bucket = buckets[nextIndex];
+    if (!bucket) return;
+
+    __dateNavState.syncing = true;
+    setActiveDateBucket(bucket.key, bucket.label);
+    await jumpToMessage(bucket.index);
+    setTimeout(() => { __dateNavState.syncing = false; }, DATE_NAV_SYNC_LOCK_MS);
+}
+
+function updateDateStepButtons(activeIndex, total) {
+    const prevButton = document.getElementById('dateNavPrev');
+    const nextButton = document.getElementById('dateNavNext');
+    if (prevButton) prevButton.disabled = activeIndex <= 0;
+    if (nextButton) nextButton.disabled = activeIndex < 0 || activeIndex >= total - 1;
+}
+
+function setActiveDateBucket(key, label) {
+    __dateNavState.activeKey = key;
+    const current = document.getElementById('dateNavCurrent');
+    if (current) current.innerText = label || '';
+
+    const scale = __dateNavState.scale;
+    const buckets = __dateNavState.bucketsByScale[scale] || [];
+    const activeBucket = buckets.find(bucket => bucket.key === key);
+    const slider = document.getElementById('dateNavSlider');
+    const sliderMeta = document.getElementById('dateNavSliderMeta');
+    if (slider) {
+        const index = Math.max(0, buckets.findIndex(bucket => bucket.key === key));
+        slider.value = String(index);
+    }
+    if (sliderMeta && activeBucket) {
+        sliderMeta.innerText = `${activeBucket.count} message${activeBucket.count === 1 ? '' : 's'}`;
+    }
+
+    const activeIndex = buckets.findIndex(bucket => bucket.key === key);
+    updateDateStepButtons(activeIndex, buckets.length);
+
+    const track = document.getElementById('dateNavTrack');
+    if (!track) return;
+    if (scale !== 'month') return;
+
+    track.querySelectorAll('.date-nav-item').forEach(item => {
+        const active = item.dataset.dateKey === key;
+        item.classList.toggle('active', active);
+        if (active) item.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+    });
+}
+
+function updateActiveDateFromScroll() {
+    if (__dateNavState.syncing) return;
+    const chatContainer = document.getElementById('chat');
+    if (!chatContainer || !window.currentChatData?.messages) return;
+
+    const containerRect = chatContainer.getBoundingClientRect();
+    const messages = Array.from(chatContainer.querySelectorAll('.message[data-msg-index]'));
+    const activeLine = containerRect.top + Math.max(DATE_NAV_ACTIVE_LINE_MIN_PX, containerRect.height * DATE_NAV_ACTIVE_LINE_RATIO);
+    const currentEl = messages.find(el => el.getBoundingClientRect().bottom >= activeLine) || messages[messages.length - 1];
+    if (!currentEl) return;
+
+    const msg = window.currentChatData.messages[Number(currentEl.dataset.msgIndex)];
+    const timestamp = getMessageTimestamp(msg);
+    if (timestamp === null) return;
+
+    const scale = __dateNavState.scale;
+    const key = getBucketKey(scale, timestamp);
+    const bucket = (__dateNavState.bucketsByScale[scale] || []).find(item => item.key === key);
+    if (bucket && bucket.key !== __dateNavState.activeKey) {
+        setActiveDateBucket(bucket.key, bucket.label);
+    }
+}
+
+document.querySelectorAll('[data-date-scale]').forEach(button => {
+    button.addEventListener('click', () => {
+        const scale = button.dataset.dateScale;
+        if (!scale || scale === __dateNavState.scale) return;
+        __dateNavState.scale = scale;
+        __dateNavState.activeKey = null;
+        renderDateNavigator();
+        updateActiveDateFromScroll();
+    });
+});
+
+document.getElementById('chat')?.addEventListener('scroll', () => {
+    clearTimeout(__dateNavState.scrollTimer);
+    __dateNavState.scrollTimer = setTimeout(updateActiveDateFromScroll, 80);
+});
+
+document.getElementById('dateNavPrev')?.addEventListener('click', () => stepDateBucket(-1));
+document.getElementById('dateNavNext')?.addEventListener('click', () => stepDateBucket(1));
+document.getElementById('dateNavToggle')?.addEventListener('click', () => {
+    if (__dateNavState.autoCollapse) return;
+    __dateNavState.collapsed = !__dateNavState.collapsed;
+    storageSet('dateNavCollapsed', __dateNavState.collapsed ? '1' : '0');
+    applyDateNavigatorCollapseMode();
+});
+
+const chatHeader = document.querySelector('.chat-header');
+chatHeader?.addEventListener('mouseenter', () => { __dateNavState.headerHover = true; });
+chatHeader?.addEventListener('mouseleave', () => { __dateNavState.headerHover = false; });
+document.addEventListener('keydown', (event) => {
+    const headerFocused = chatHeader?.contains(document.activeElement);
+    if (!__dateNavState.headerHover && !headerFocused) return;
+    if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+        event.preventDefault();
+        stepDateBucket(-1);
+    } else if (event.key === 'ArrowRight' || event.key === 'PageDown') {
+        event.preventDefault();
+        stepDateBucket(1);
+    }
+});
 
 function setupChatInterface(data) {
     window.currentChatData = data;
@@ -203,6 +634,22 @@ function setupCheckboxListeners() {
         // trigger change once to apply initial visibility
         input.dispatchEvent(new Event('change'));
     });
+
+    const autoCollapseInput = document.getElementById('autoCollapseDateNav');
+    if (autoCollapseInput && !autoCollapseInput.dataset.bound) {
+        autoCollapseInput.dataset.bound = '1';
+        const saved = storageGet('ui_autoCollapseDateNav');
+        autoCollapseInput.checked = saved !== null ? saved === '1' : true;
+        __dateNavState.autoCollapse = autoCollapseInput.checked;
+        __dateNavState.collapsed = storageGet('dateNavCollapsed') === '1';
+        applyDateNavigatorCollapseMode();
+        autoCollapseInput.addEventListener('change', function() {
+            __dateNavState.autoCollapse = this.checked;
+            if (this.checked) __dateNavState.collapsed = false;
+            storageSet('ui_autoCollapseDateNav', this.checked ? '1' : '0');
+            applyDateNavigatorCollapseMode();
+        });
+    }
 }
 
 function getMessageText(msg) {
@@ -311,6 +758,7 @@ function renderMessages(data, selectedValue) {
     renderedMessages.clear();
     chatContainer.innerHTML = "";
     enrichReactionTimestamps(data.messages);
+    setupDateNavigator(data.messages);
     
     if (!data.messages.length) {
         loading.innerHTML = "No messages";
@@ -347,6 +795,7 @@ function renderMessages(data, selectedValue) {
     setTimeout(() => {
         loading.style.display = "none";
         chatContainer.style.display = "block";
+        updateActiveDateFromScroll();
     }, 100);
 }
 
@@ -461,22 +910,17 @@ function mergeRanges(ranges) {
 function highlightText(original, query) {
     if (!query || !original) return escapeHtml(original);
     const qNorm = normalizeForSearch(query);
-    const tokens = qNorm.split(' ').filter(Boolean);
-    if (!tokens.length) return escapeHtml(original);
+    if (!qNorm) return escapeHtml(original);
 
-    let allRanges = [];
-    for (const t of tokens) {
-        const ranges = findRangesForToken(original, t);
-        allRanges = allRanges.concat(ranges);
-    }
+    const allRanges = findRangesForToken(original, qNorm);
     if (!allRanges.length) return escapeHtml(original);
     const merged = mergeRanges(allRanges);
-    // build HTML with <strong>
+    // build HTML with highlight spans that do not alter font weight or size
     let out = '';
     let lastIdx = 0;
     for (const [s,e] of merged) {
         out += escapeHtml(original.slice(lastIdx, s));
-        out += '<strong>' + escapeHtml(original.slice(s, e)) + '</strong>';
+        out += '<span class="search-highlight">' + escapeHtml(original.slice(s, e)) + '</span>';
         lastIdx = e;
     }
     out += escapeHtml(original.slice(lastIdx));
@@ -578,37 +1022,6 @@ function buildSearchIndex(messages) {
     return idx;
 }
 
-// Simple fuzzy scoring: combination of substring match, token overlap, and Levenshtein distance on small strings
-function fuzzyScore(query, target) {
-    if (!query || !target) return 0;
-    if (target.includes(query)) return 100 + Math.min(50, query.length); // strong boost for substring
-
-    // token overlap
-    const qTokens = query.split(' ');
-    const tTokens = target.split(' ');
-    let overlap = 0;
-    for (const qt of qTokens) {
-        for (const tt of tTokens) {
-            if (tt.includes(qt) || qt.includes(tt)) { overlap += 1; break; }
-        }
-    }
-    const tokenScore = overlap * 10;
-
-    // small Levenshtein distance for short tokens (cheap implementation)
-    function lev(a,b){
-        const m=a.length,n=b.length; if(m*n===0) return m+n; const dp = Array(m+1).fill(0).map(()=>Array(n+1).fill(0));
-        for(let i=0;i<=m;i++) dp[i][0]=i; for(let j=0;j<=n;j++) dp[0][j]=j;
-        for(let i=1;i<=m;i++) for(let j=1;j<=n;j++) dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:Math.min(dp[i-1][j]+1,dp[i][j-1]+1,dp[i-1][j-1]+1);
-        return dp[m][n];
-    }
-
-    const shortQuery = query.length > 30 ? query.slice(0,30) : query;
-    const dist = lev(shortQuery, target.slice(0, shortQuery.length+10));
-    const distScore = Math.max(0, 30 - dist);
-
-    return tokenScore + distScore;
-}
-
 // Asynchronous batched search to keep UI responsive and report progress
 async function performSearch(query, index, onProgress) {
     const results = [];
@@ -619,14 +1032,14 @@ async function performSearch(query, index, onProgress) {
     for (let i = 0; i < index.length; i += BATCH) {
         const batch = index.slice(i, i + BATCH);
         for (const item of batch) {
-            const score = fuzzyScore(normalizedQuery, item.normalized);
-            if (score > 0) results.push({ score, item });
+            if (item.normalized.includes(normalizedQuery)) {
+                results.push({ item });
+            }
         }
         if (onProgress) onProgress(Math.min(100, Math.round(((i + BATCH) / index.length) * 100)));
         // yield to UI
         await new Promise(r => setTimeout(r, 0));
     }
-    results.sort((a,b) => b.score - a.score);
     return results;
 }
 
@@ -639,17 +1052,15 @@ searchInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') startSe
 const clearSearchBtn = document.getElementById('clearSearchBtn');
 clearSearchBtn?.addEventListener('click', clearSearch);
 
-// Update highlights live when user edits the search box (but debounce)
+// Keep typing in the search box from mutating the chat DOM and shifting scroll.
 let _highlightTimeout = null;
 searchInput?.addEventListener('input', () => {
     clearTimeout(_highlightTimeout);
     _highlightTimeout = setTimeout(() => {
         const q = (searchInput.value || '').trim();
-        // if input cleared, hide results box
         if (!q) {
             if (searchResultsEl) searchResultsEl.style.display = 'none';
         }
-        updateHighlightsAcrossDOM(q);
     }, 250);
 });
 
@@ -775,23 +1186,27 @@ function clearSearch() {
 // Re-render highlights inside already-rendered message DOM nodes without reconstructing everything
 function updateHighlightsAcrossDOM(query) {
     // For each rendered .message, find its text node(s) inside .message-content and replace innerHTML accordingly
+    const chatContainer = document.getElementById('chat');
+    const scrollTop = chatContainer ? chatContainer.scrollTop : 0;
+    const previousOverflowAnchor = chatContainer ? chatContainer.style.overflowAnchor : '';
+    if (chatContainer) chatContainer.style.overflowAnchor = 'none';
     const msgEls = document.querySelectorAll('.message');
     const q = query || '';
     msgEls.forEach(el => {
         // find original text: try to reconstruct from dataset or fallback to current textContent
-        // We didn't store raw text per element, so safely re-extract from the current DOM but first strip existing <strong>
+        // We didn't store raw text per element, so safely re-extract from the current DOM but first strip existing highlights
         const contentEl = el.querySelector('.message-content');
         if (!contentEl) return;
-        // Build a plain-text by cloning and removing strong tags
+        // Build a plain-text by cloning and removing highlight tags
         const clone = contentEl.cloneNode(true);
     // remove media previews and reactions/timestamp to preserve them
     // note: do NOT remove <video> separately because videos are wrapped in .media-preview anchors;
     // removing both the anchor and video then re-inserting both causes duplication.
     const mediaEls = clone.querySelectorAll('.media-preview, audio, .preview, .reaction, .msg-timestamp');
         mediaEls.forEach(n => n.remove());
-        // remove strong tags
-        const strongs = clone.querySelectorAll('strong');
-        strongs.forEach(s => {
+        // remove existing highlight tags
+        const highlights = clone.querySelectorAll('.search-highlight');
+        highlights.forEach(s => {
             const txt = document.createTextNode(s.textContent);
             s.parentNode.replaceChild(txt, s);
         });
@@ -815,6 +1230,17 @@ function updateHighlightsAcrossDOM(query) {
         // Set new HTML
         originalContent.innerHTML = newHTML + extras.join('');
     });
+    if (chatContainer) {
+        const restoreScroll = () => { chatContainer.scrollTop = scrollTop; };
+        restoreScroll();
+        requestAnimationFrame(() => {
+            restoreScroll();
+            requestAnimationFrame(() => {
+                restoreScroll();
+                chatContainer.style.overflowAnchor = previousOverflowAnchor;
+            });
+        });
+    }
 }
 
 function scrollIntoViewWithPadding(container, element, padding = 60) {
