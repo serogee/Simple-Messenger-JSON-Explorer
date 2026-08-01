@@ -8,6 +8,9 @@ const CHUNK_SIZE = 50;
 const DATE_NAV_SYNC_LOCK_MS = 900;
 const DATE_NAV_ACTIVE_LINE_MIN_PX = 120;
 const DATE_NAV_ACTIVE_LINE_RATIO = 0.25;
+const CHUNK_ESTIMATED_MESSAGE_HEIGHT = 58;
+const CHUNK_ESTIMATED_MEDIA_HEIGHT = 150;
+const CHUNK_ESTIMATED_SEPARATOR_HEIGHT = 34;
 let renderedMessages = new Map();
 let observer = null;
 
@@ -380,6 +383,7 @@ function renderDateNavigator() {
         button.title = `${bucket.label} - ${bucket.count} messages`;
         button.innerHTML = `
             <span class="date-nav-label">${escapeHtml(bucket.label)}</span>
+            <span class="date-nav-count">${bucket.count} msg${bucket.count === 1 ? '' : 's'}</span>
             <span class="date-nav-density" aria-hidden="true">
                 <span style="width:${Math.max(8, Math.round((bucket.count / maxCount) * 100))}%"></span>
             </span>
@@ -743,6 +747,41 @@ function findPreviousVisibleMessageIndex(messages, fromIndex) {
     return -1;
 }
 
+function estimateChunkHeight(messages, chunkIndex) {
+    if (!Array.isArray(messages) || !messages.length) return 0;
+
+    let visibleCount = 0;
+    let mediaCount = 0;
+    let separatorCount = 0;
+
+    messages.forEach((msg, localIdx) => {
+        if (isReactionNoticeMessage(msg)) return;
+        visibleCount += 1;
+        mediaCount += getMessageMediaItems(msg).length;
+
+        const globalIdx = chunkIndex * CHUNK_SIZE + localIdx;
+        if (globalIdx === 0) {
+            separatorCount += 1;
+            return;
+        }
+
+        const prevIdx = findPreviousVisibleMessageIndex(window.currentChatData?.messages || [], globalIdx);
+        const prevMsg = prevIdx >= 0 ? window.currentChatData.messages[prevIdx] : null;
+        const prevTime = prevMsg ? (prevMsg.timestamp || prevMsg.timestamp_ms || 0) : 0;
+        const currTime = msg.timestamp || msg.timestamp_ms || 0;
+        if (!prevMsg || Math.abs(currTime - prevTime) > 10 * 60 * 1000) {
+            separatorCount += 1;
+        }
+    });
+
+    return Math.max(
+        160,
+        (visibleCount * CHUNK_ESTIMATED_MESSAGE_HEIGHT) +
+        (mediaCount * CHUNK_ESTIMATED_MEDIA_HEIGHT) +
+        (separatorCount * CHUNK_ESTIMATED_SEPARATOR_HEIGHT)
+    );
+}
+
 function renderMessages(data, selectedValue) {
     const chatContainer = document.getElementById("chat");
     const loading = document.getElementById("loading");
@@ -772,6 +811,7 @@ function renderMessages(data, selectedValue) {
         const chunkContainer = document.createElement("div");
         chunkContainer.classList.add("message-chunk");
         chunkContainer.dataset.chunkIndex = index;
+        chunkContainer.style.minHeight = `${estimateChunkHeight(chunk, index)}px`;
         chatContainer.appendChild(chunkContainer);
     });
 
@@ -1271,6 +1311,13 @@ function renderChunk(chunkIndex, messages, selectedValue) {
     const chunkContainer = document.querySelector(`.message-chunk[data-chunk-index="${chunkIndex}"]`);
     if (!chunkContainer || renderedMessages.has(chunkIndex)) return;
 
+    const chatContainer = document.getElementById('chat');
+    const containerRect = chatContainer ? chatContainer.getBoundingClientRect() : null;
+    const chunkRect = chunkContainer.getBoundingClientRect();
+    const isAboveViewport = containerRect ? chunkRect.bottom < containerRect.top : false;
+    const previousHeight = chunkContainer.offsetHeight;
+    const previousScrollTop = chatContainer ? chatContainer.scrollTop : 0;
+
     const highlightQuery = (searchInput && searchInput.value) ? searchInput.value : '';
     messages.forEach((msg, localIdx) => {
         const globalIdx = chunkIndex * CHUNK_SIZE + localIdx;
@@ -1310,6 +1357,15 @@ function renderChunk(chunkIndex, messages, selectedValue) {
     ["showMyName", "showTheirName", "showReacts"].forEach(id => {
         document.getElementById(id).dispatchEvent(new Event("change"));
     });
+
+    chunkContainer.style.minHeight = '';
+
+    if (chatContainer && isAboveViewport) {
+        const heightDelta = chunkContainer.offsetHeight - previousHeight;
+        if (heightDelta !== 0) {
+            chatContainer.scrollTop = previousScrollTop + heightDelta;
+        }
+    }
 }
 
 // Replace previous declaration by ensuring we don't double-define if hot-reloaded
