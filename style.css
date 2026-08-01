@@ -30,7 +30,7 @@
     --them-bg: #e9eef8;
     --highlight: rgba(255, 221, 64, 0.38);
     --border: #e6e9ee;
-    --sidebar-width: clamp(280px, 35vw, 560px);
+    --sidebar-width: clamp(260px, 24vw, 480px);
     --info-panel-width: 320px;
     /* hover overlay colors (light/dark) */
     --hover-overlay: rgba(0,0,0,0.04);
@@ -55,6 +55,7 @@ body {
     background: var(--bg);
     color: var(--text);
     margin: 0;
+    overflow: hidden;
 }
 
 /* Typography */
@@ -90,9 +91,9 @@ h3 { margin: 0; position: relative; font-size: 16px; }
 }
 
 /* Settings Panel */
-.settings { max-height: calc(100vh - 130px); overflow:auto; }
+.settings { flex: 1 1 auto; min-height: 0; overflow: auto; }
 
-.sub-container { margin:20px 0 20px 20px; background:var(--panel-bg); padding:15px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.06); position:relative; }
+.sub-container { display: flex; flex-direction: column; height: calc(100vh - 40px); box-sizing: border-box; margin:20px 0 20px 20px; background:var(--panel-bg); padding:15px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.06); position:relative; }
 .sidebar-resize-handle,
 .info-resize-handle {
     align-self:stretch;
@@ -163,8 +164,8 @@ h3 { margin: 0; position: relative; font-size: 16px; }
 .settings input[type="checkbox"] { transform:scale(1.2); cursor:pointer; }
 
 /* Chat container */
-.chat-container { display:flex; flex-direction:column; width:auto; min-width:0; margin:20px 20px 20px 0; background:var(--panel-bg); padding:0 10px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.06); position:relative; }
-#chat { overflow-y:auto; max-height:80vh; padding:10px; overflow-anchor:none; }
+.chat-container { display:flex; flex-direction:column; width:auto; min-width:0; margin:20px 20px 20px 0; background:var(--panel-bg); padding:0 10px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.06); position:relative; height:calc(100vh - 40px); box-sizing:border-box; }
+#chat { overflow-y:auto; flex: 1 1 auto; min-height: 0; padding:10px; overflow-anchor:none; }
 .chat-header {
     display:flex;
     align-items:center;
@@ -666,6 +667,7 @@ img, video { max-width:100%; border-radius:10px; margin:5px; cursor:pointer; tra
 
 /* Responsive */
 @media (max-width:768px) {
+    body { overflow: auto; }
     .container { grid-template-columns: 1fr; height:auto; }
     .sidebar-resize-handle { display:none; }
     .info-resize-handle { display:none !important; }
