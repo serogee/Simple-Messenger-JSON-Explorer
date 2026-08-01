@@ -1,0 +1,50 @@
+/* Settings Panel */
+.settings { flex: 1 1 auto; min-height: 0; overflow: auto; }
+/* add a little right padding on common scrollable containers so content doesn't touch the scrollbar */
+.settings { padding-right: 10px; }
+
+.settings strong { font-size: 16px; color: var(--text); }
+.title-row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.title-text { color:var(--text); }
+
+/* Settings button inline next to title */
+.global-settings-btn { width:40px; height:36px; border-radius:8px; padding:6px; background:var(--panel-bg); border:none; cursor:pointer; color:var(--text); display:flex; align-items:center; justify-content:center; }
+.global-settings-btn svg { display:block; width:18px; height:18px; }
+.global-settings-btn .bar { transform-origin:50% 50%; transition: transform 180ms cubic-bezier(.2,.9,.2,1), opacity 130ms linear; }
+.global-settings-btn.open .vert { transform: rotate(45deg) translateY(0); }
+.global-settings-btn.open .horiz { transform: rotate(45deg) translateX(0); }
+
+/* Buttons */
+.btn { padding:8px 12px; border-radius:8px; border:1px solid transparent; cursor:pointer; }
+.btn-primary { background:var(--accent); color:white; border-color:rgba(0,0,0,0.06); }
+.btn-secondary { background:transparent; color:var(--text); border:1px solid var(--border); padding:6px 8px; border-radius:6px; }
+.btn-link { color:var(--accent); text-decoration:none; font-weight:600; margin-right:12px; }
+
+/* Forms & Inputs */
+#tips { color:var(--muted); font-size:12px; font-style:italic; margin-top:8px; display:block; }
+.settings input[type="file"] { margin:10px 0; padding:5px; display:block; border:1px solid var(--border); border-radius:5px; background:var(--panel-bg); cursor:pointer; }
+.choiceForm { display:flex; flex-direction:column; gap:5px; }
+.settings form { display:flex; flex-direction:column; gap:5px; margin-top:5px; }
+.settings label { display:flex; align-items:center; gap:5px; font-size:14px; cursor:pointer; }
+.settings input[type="checkbox"] { transform:scale(1.2); cursor:pointer; }
+
+/* Options Area */
+.options { display: none; }
+.options strong { display: block; margin-bottom: 8px; }
+
+/* Toggle switch */
+.switch { position: relative; display: inline-block; width: 46px; height: 26px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #ccc; transition: .2s; border-radius: 26px; }
+.slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 3px; background: white; transition: .2s; border-radius: 50%; }
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider:before { transform: translateX(20px); }
+
+/* Footer & Download Info */
+.footer { margin: 5px 0; display: block; color: var(--muted); }
+.footer a { color: var(--accent); text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+
+.download-info strong { display: block; margin-bottom: 8px; }
+.download-info a { display: block; color: #1877f2; font-size: 0.9em; text-decoration: none; margin: 6px 0; }
+.download-info a:hover { text-decoration: underline; }
