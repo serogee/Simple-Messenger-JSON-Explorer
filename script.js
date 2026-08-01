@@ -1206,8 +1206,14 @@ function renderMessages(data, selectedValue) {
     
     renderedMessages.clear();
     chatContainer.innerHTML = "";
-    enrichReactionTimestamps(data.messages);
-    setupDateNavigator(data.messages);
+    if (!data._reactionsEnriched) {
+        enrichReactionTimestamps(data.messages);
+        data._reactionsEnriched = true;
+    }
+    if (!data._dateNavBuilt) {
+        setupDateNavigator(data.messages);
+        data._dateNavBuilt = true;
+    }
     
     if (!data.messages.length) {
         loading.innerHTML = "No messages";
@@ -1217,11 +1223,15 @@ function renderMessages(data, selectedValue) {
 
     const messageChunks = chunkArray(data.messages, CHUNK_SIZE);
     
+    if (!data._chunkHeights) {
+        data._chunkHeights = messageChunks.map((chunk, index) => estimateChunkHeight(chunk, index));
+    }
+
     messageChunks.forEach((chunk, index) => {
         const chunkContainer = document.createElement("div");
         chunkContainer.classList.add("message-chunk");
         chunkContainer.dataset.chunkIndex = index;
-        chunkContainer.style.minHeight = `${estimateChunkHeight(chunk, index)}px`;
+        chunkContainer.style.minHeight = `${data._chunkHeights[index]}px`;
         chatContainer.appendChild(chunkContainer);
     });
 
