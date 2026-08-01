@@ -390,15 +390,8 @@ function updateChatInfoPanel(data) {
         .join('');
 
     content.innerHTML = `
-        <div class="info-panel-label">Chat Info</div>
         <section class="info-section">
-            <strong>Members</strong>
-            <div class="member-list">
-                ${participants.length ? participants.map(name => `<div class="member-chip">${escapeHtml(name)}</div>`).join('') : '<div class="info-empty">No members found</div>'}
-            </div>
-        </section>
-        <section class="info-section">
-            <strong>Chat Information</strong>
+            <strong>Chat info</strong>
             <div class="info-stats">
                 <div class="info-metric"><span>Messages</span><strong>${formatInfoNumber(messageCount)}</strong></div>
                 <div class="info-metric"><span>Members</span><strong>${formatInfoNumber(participants.length)}</strong></div>
@@ -420,6 +413,12 @@ function updateChatInfoPanel(data) {
         <section class="info-section">
             <strong>Messages Per Member</strong>
             <div class="info-list">${memberStats || '<div class="info-empty">No messages found</div>'}</div>
+        </section>
+        <section class="info-section">
+            <strong>Members</strong>
+            <div class="member-list">
+                ${participants.length ? participants.map(name => `<div class="member-chip">${escapeHtml(name)}</div>`).join('') : '<div class="info-empty">No members found</div>'}
+            </div>
         </section>
     `;
 }

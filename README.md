@@ -20,6 +20,7 @@ This project is a fork of [DuckCIT/Facebook-Messenger-JSON-Viewer](https://githu
 1. Export your Facebook Messenger data from Facebook.
 2. Open Simple Messenger JSON Explorer from your fork or local copy.
 3. Select one or more Messenger `.json` files. If your export contains split files like `message_1.json`, `message_2.json`, and so on, you can select them together.
+![Selecting multiple JSON files](screenshots/jsonSelection.png)
 4. Optional: select the media folder if you want images, videos, GIFs, or audio to display.
 
 **There are two common media folder cases:**

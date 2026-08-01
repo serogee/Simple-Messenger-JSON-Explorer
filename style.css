@@ -205,7 +205,7 @@ h3 { margin: 0; position: relative; font-size: 16px; }
 .date-nav-controls.active {
     display:flex;
 }
-.date-nav-controls:not(.active) + .date-nav-track {
+.date-nav-controls:not(.active) ~ .date-nav-track {
     display:none;
 }
 .date-nav-scale {
