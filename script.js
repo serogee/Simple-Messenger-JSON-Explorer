@@ -6,6 +6,7 @@ let currentJsonFileSize = null;
 let currentJsonFileModified = null;
 const CHUNK_SIZE = 50;
 let currentSidebarWidth = null;
+let currentInfoPanelWidth = null;
 const DATE_NAV_SYNC_LOCK_MS = 900;
 const DATE_NAV_ACTIVE_LINE_MIN_PX = 120;
 const DATE_NAV_ACTIVE_LINE_RATIO = 0.25;
@@ -143,6 +144,161 @@ function setupSidebarResize() {
 }
 
 setupSidebarResize();
+
+function clampInfoPanelWidth(width) {
+    const viewportWidth = window.innerWidth || 1200;
+    const min = 260;
+    const max = Math.min(520, Math.max(min, viewportWidth * 0.45));
+    return Math.min(max, Math.max(min, width));
+}
+
+function setInfoPanelWidth(width, persist = false) {
+    const clamped = clampInfoPanelWidth(width);
+    currentInfoPanelWidth = clamped;
+    document.documentElement.style.setProperty('--info-panel-width', `${clamped}px`);
+    if (persist) storageSet('infoPanelWidth', String(Math.round(clamped)));
+}
+
+function setupInfoPanelControls() {
+    const container = document.querySelector('.container');
+    const toggle = document.getElementById('chatInfoToggle');
+    const panel = document.getElementById('chatInfoPanel');
+    const handle = document.getElementById('infoResizeHandle');
+    if (!container || !toggle || !panel || !handle || toggle.dataset.bound) return;
+    toggle.dataset.bound = '1';
+
+    const savedOpen = storageGet('infoPanelOpen') === '1';
+    const savedWidth = Number(storageGet('infoPanelWidth'));
+    if (Number.isFinite(savedWidth) && savedWidth > 0) {
+        setInfoPanelWidth(savedWidth);
+    }
+
+    const setOpen = (open) => {
+        container.classList.toggle('info-open', open);
+        toggle.setAttribute('aria-expanded', String(open));
+        panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+        storageSet('infoPanelOpen', open ? '1' : '0');
+    };
+
+    setOpen(savedOpen);
+    toggle.addEventListener('click', () => setOpen(!container.classList.contains('info-open')));
+
+    let resizing = false;
+    let dragOffset = 0;
+
+    const stopResize = () => {
+        if (!resizing) return;
+        resizing = false;
+        container.classList.remove('resizing');
+        if (Number.isFinite(currentInfoPanelWidth)) setInfoPanelWidth(currentInfoPanelWidth, true);
+    };
+
+    handle.addEventListener('pointerdown', event => {
+        resizing = true;
+        const handleRect = handle.getBoundingClientRect();
+        dragOffset = event.clientX - (handleRect.left + handleRect.width / 2);
+        container.classList.add('resizing');
+        handle.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    });
+
+    handle.addEventListener('pointermove', event => {
+        if (!resizing) return;
+        const containerRect = container.getBoundingClientRect();
+        const handleCenter = event.clientX - dragOffset;
+        setInfoPanelWidth(containerRect.right - handleCenter - handle.offsetWidth / 2 - 20);
+    });
+
+    handle.addEventListener('pointerup', stopResize);
+    handle.addEventListener('pointercancel', stopResize);
+
+    handle.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        const current = Number.isFinite(currentInfoPanelWidth) ? currentInfoPanelWidth : clampInfoPanelWidth(panel.getBoundingClientRect().width);
+        const delta = event.key === 'ArrowLeft' ? 20 : -20;
+        setInfoPanelWidth(current + delta, true);
+    });
+
+    window.addEventListener('resize', () => {
+        if (Number.isFinite(currentInfoPanelWidth)) setInfoPanelWidth(currentInfoPanelWidth);
+    });
+}
+
+setupInfoPanelControls();
+
+function formatInfoNumber(value) {
+    return Number(value || 0).toLocaleString();
+}
+
+function formatInfoDate(timestamp) {
+    return timestamp ? new Date(timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Unknown';
+}
+
+function getParticipantNames(data) {
+    return (data?.participants || [])
+        .map(participant => typeof participant === 'string' ? participant : participant?.name)
+        .filter(Boolean);
+}
+
+function updateChatInfoPanel(data) {
+    const content = document.getElementById('chatInfoContent');
+    if (!content) return;
+    if (!data || !Array.isArray(data.messages)) {
+        content.innerHTML = '<div class="info-empty">No conversation loaded</div>';
+        return;
+    }
+
+    const participants = getParticipantNames(data);
+    const visibleMessages = data.messages.filter(msg => !isReactionNoticeMessage(msg));
+    const messageCount = visibleMessages.length;
+    const timestamps = visibleMessages.map(getMessageTimestamp).filter(timestamp => timestamp !== null);
+    const createdAt = timestamps.length ? Math.min(...timestamps) : null;
+    const lastMessageAt = timestamps.length ? Math.max(...timestamps) : null;
+    const memberCounts = new Map();
+
+    participants.forEach(name => memberCounts.set(name, 0));
+    visibleMessages.forEach(msg => {
+        const sender = msg.senderName || msg.sender_name || 'Unknown';
+        memberCounts.set(sender, (memberCounts.get(sender) || 0) + 1);
+    });
+
+    const memberStats = Array.from(memberCounts.entries())
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([name, count]) => {
+            const percent = messageCount ? (count / messageCount) * 100 : 0;
+            return `
+                <div class="member-stat">
+                    <div class="member-stat-name">${escapeHtml(name)}</div>
+                    <div class="member-stat-meta">${formatInfoNumber(count)} (${percent.toFixed(1)}%)</div>
+                    <div class="member-stat-bar"><span style="width:${Math.max(1, percent)}%"></span></div>
+                </div>
+            `;
+        })
+        .join('');
+
+    content.innerHTML = `
+        <section class="info-section">
+            <strong>Members</strong>
+            <div class="member-list">
+                ${participants.length ? participants.map(name => `<div class="member-chip">${escapeHtml(name)}</div>`).join('') : '<div class="info-empty">No members found</div>'}
+            </div>
+        </section>
+        <section class="info-section">
+            <strong>Chat Information</strong>
+            <div class="info-stats">
+                <div class="info-metric"><span>Messages</span><strong>${formatInfoNumber(messageCount)}</strong></div>
+                <div class="info-metric"><span>Members</span><strong>${formatInfoNumber(participants.length)}</strong></div>
+                <div class="info-row"><span>Created at</span><span>${formatInfoDate(createdAt)}</span></div>
+                <div class="info-row"><span>Last message</span><span>${formatInfoDate(lastMessageAt)}</span></div>
+            </div>
+        </section>
+        <section class="info-section">
+            <strong>Messages Per Member</strong>
+            <div class="info-list">${memberStats || '<div class="info-empty">No messages found</div>'}</div>
+        </section>
+    `;
+}
 
 function sanitizeFileName(name) {
     return String(name || 'conversation')
@@ -638,6 +794,7 @@ function setupChatInterface(data) {
     const threadName = data.threadName || data.title || data.threadPath || "Untitled";
 
     document.getElementById("threadName").innerText = threadName;
+    updateChatInfoPanel(data);
     setupRadioButtons(participants);
 
     // after building radios, determine selected

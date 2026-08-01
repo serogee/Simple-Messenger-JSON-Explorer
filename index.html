@@ -140,12 +140,24 @@
                         <button type="button" id="dateNavNext" aria-label="Next date">&gt;</button>
                     </div>
                 </div>
+                <button type="button" id="chatInfoToggle" class="chat-info-toggle" aria-label="Toggle chat information" aria-expanded="false">i</button>
                 <div id="dateNavTrack" class="date-nav-track" aria-label="Conversation dates"></div>
             </div>
             <div id="line"></div>
             <div id="chat"></div>
             <div id="loading">No data available</div>
         </div>
+
+        <div id="infoResizeHandle" class="info-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize info panel" tabindex="0"></div>
+
+        <aside id="chatInfoPanel" class="chat-info-panel" aria-hidden="true">
+            <div class="info-panel-header">
+                <strong>Chat Info</strong>
+            </div>
+            <div id="chatInfoContent" class="info-panel-content">
+                <div class="info-empty">No conversation loaded</div>
+            </div>
+        </aside>
     </div>
     
     <!-- Trust & privacy dialog: appears on first load unless user disables it -->
