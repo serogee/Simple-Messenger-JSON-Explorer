@@ -5,6 +5,7 @@ let currentJsonFileName = null;
 let currentJsonFileSize = null;
 let currentJsonFileModified = null;
 const CHUNK_SIZE = 50;
+let currentSidebarWidth = null;
 const DATE_NAV_SYNC_LOCK_MS = 900;
 const DATE_NAV_ACTIVE_LINE_MIN_PX = 120;
 const DATE_NAV_ACTIVE_LINE_RATIO = 0.25;
@@ -72,6 +73,76 @@ function storageRemove(key) {
     try { localStorage.removeItem(k); } catch(e) {}
     try { setCookie(k, '', -1); } catch(e) {}
 }
+
+function clampSidebarWidth(width) {
+    const viewportWidth = window.innerWidth || 1200;
+    const min = 260;
+    const max = Math.min(640, Math.max(min, viewportWidth * 0.55));
+    return Math.min(max, Math.max(min, width));
+}
+
+function setSidebarWidth(width, persist = false) {
+    const clamped = clampSidebarWidth(width);
+    currentSidebarWidth = clamped;
+    document.documentElement.style.setProperty('--sidebar-width', `${clamped}px`);
+    if (persist) storageSet('sidebarWidth', String(Math.round(clamped)));
+}
+
+function setupSidebarResize() {
+    const handle = document.getElementById('sidebarResizeHandle');
+    const container = document.querySelector('.container');
+    if (!handle || !container || handle.dataset.bound) return;
+    handle.dataset.bound = '1';
+
+    const savedWidth = Number(storageGet('sidebarWidth'));
+    if (Number.isFinite(savedWidth) && savedWidth > 0) {
+        setSidebarWidth(savedWidth);
+    } else {
+        currentSidebarWidth = clampSidebarWidth(handle.getBoundingClientRect().left - container.getBoundingClientRect().left);
+    }
+
+    let resizing = false;
+    let dragOffset = 0;
+
+    const stopResize = () => {
+        if (!resizing) return;
+        resizing = false;
+        container.classList.remove('resizing');
+        if (Number.isFinite(currentSidebarWidth)) setSidebarWidth(currentSidebarWidth, true);
+    };
+
+    handle.addEventListener('pointerdown', event => {
+        resizing = true;
+        const handleRect = handle.getBoundingClientRect();
+        dragOffset = event.clientX - (handleRect.left + handleRect.width / 2);
+        container.classList.add('resizing');
+        handle.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
+    });
+
+    handle.addEventListener('pointermove', event => {
+        if (!resizing) return;
+        const handleCenter = event.clientX - dragOffset;
+        setSidebarWidth(handleCenter - container.getBoundingClientRect().left - handle.offsetWidth / 2);
+    });
+
+    handle.addEventListener('pointerup', stopResize);
+    handle.addEventListener('pointercancel', stopResize);
+
+    handle.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        event.preventDefault();
+        const current = Number.isFinite(currentSidebarWidth) ? currentSidebarWidth : clampSidebarWidth(handle.getBoundingClientRect().left - container.getBoundingClientRect().left);
+        const delta = event.key === 'ArrowRight' ? 20 : -20;
+        setSidebarWidth(current + delta, true);
+    });
+
+    window.addEventListener('resize', () => {
+        if (Number.isFinite(currentSidebarWidth)) setSidebarWidth(currentSidebarWidth);
+    });
+}
+
+setupSidebarResize();
 
 function sanitizeFileName(name) {
     return String(name || 'conversation')
