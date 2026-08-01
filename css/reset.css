@@ -9,6 +9,13 @@ body {
 /* Typography */
 h3 { margin: 0; position: relative; font-size: 16px; }
 
+hr {
+    border: none;
+    border-top: 2px solid var(--border);
+    margin: 15px 0;
+    width: 100%;
+}
+
 a {
     color: var(--accent);
     text-decoration: none;

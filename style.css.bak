@@ -60,6 +60,13 @@ body {
 
 /* Typography */
 h3 { margin: 0; position: relative; font-size: 16px; }
+
+hr {
+    border: none;
+    border-top: 2px solid var(--border);
+    margin: 15px 0;
+    width: 100%;
+}
 .settings strong { font-size: 16px; color: var(--text); }
 
 .placeholder { width:150px; height:60px; display:flex; align-items:center; justify-content:center; border-radius:10px; background:#ddd; color:#555; transition:all .2s ease; }
