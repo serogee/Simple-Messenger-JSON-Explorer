@@ -538,20 +538,77 @@ async function loadJsonFiles(files) {
 }
 
 function parseMessengerJsonContent(content) {
-    const isThreadPathFormat = content.includes('"thread_path"');
+    let data;
 
-    if (isThreadPathFormat) {
-        const replaced = content.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (match, p1, p2) => {
-            const code = p1 ? parseInt(p1, 16) : parseInt(p2, 16);
-            return String.fromCharCode(code);
-        });
-        const decoded = decodeURIComponent(escape(replaced));
-        const data = JSON.parse(decoded);
-        data.messages = (data.messages || []).reverse();
-        return data;
+    try {
+        data = JSON.parse(content);
+    } catch(e) {
+        // Some older exports only parse after the legacy Messenger UTF-8 repair.
+        data = JSON.parse(decodeLegacyMessengerJsonContent(content));
     }
 
-    return JSON.parse(content);
+    if (content.includes('"thread_path"')) {
+        data.messages = (data.messages || []).reverse();
+    }
+
+    return normalizeDisplayEncoding(data);
+}
+
+function decodeLegacyMessengerJsonContent(content) {
+    const replaced = content.replace(/\\u00([a-f0-9]{2})|\\u([a-f0-9]{4})/gi, (match, p1, p2) => {
+        const code = p1 ? parseInt(p1, 16) : parseInt(p2, 16);
+        return String.fromCharCode(code);
+    });
+    return decodeURIComponent(escape(replaced));
+}
+
+function looksMisencoded(value) {
+    return /(?:\u00c3.|\u00c2.|\u00e2[\u0080-\u00bf]{1,2}|\u00f0[\u0080-\u00bf])/.test(value);
+}
+
+function fixEncoding(value) {
+    const text = String(value || "");
+    if (!looksMisencoded(text)) return text;
+
+    try {
+        // Repair old Messenger text that was UTF-8 decoded as Latin-1; keep the original on failure.
+        return decodeURIComponent(escape(text));
+    } catch(e) {
+        return text;
+    }
+}
+
+function normalizeDisplayEncoding(data) {
+    if (!data || typeof data !== "object") return data;
+
+    ["threadName", "title", "threadPath"].forEach(key => {
+        if (typeof data[key] === "string") data[key] = fixEncoding(data[key]);
+    });
+
+    if (Array.isArray(data.participants)) {
+        data.participants = data.participants.map(participant => {
+            if (typeof participant === "string") return fixEncoding(participant);
+            if (!participant || typeof participant !== "object") return participant;
+            return { ...participant, name: fixEncoding(participant.name) };
+        });
+    }
+
+    if (Array.isArray(data.messages)) {
+        data.messages.forEach(msg => {
+            if (!msg || typeof msg !== "object") return;
+            if (typeof msg.senderName === "string") msg.senderName = fixEncoding(msg.senderName);
+            if (typeof msg.sender_name === "string") msg.sender_name = fixEncoding(msg.sender_name);
+            if (Array.isArray(msg.reactions)) {
+                msg.reactions.forEach(reaction => {
+                    if (!reaction || typeof reaction !== "object") return;
+                    if (typeof reaction.actor === "string") reaction.actor = fixEncoding(reaction.actor);
+                    if (typeof reaction.reaction === "string") reaction.reaction = fixEncoding(reaction.reaction);
+                });
+            }
+        });
+    }
+
+    return data;
 }
 
 function mergeMessengerData(dataFiles) {
@@ -1011,7 +1068,7 @@ function setupCheckboxListeners() {
 }
 
 function getMessageText(msg) {
-    return String(msg?.text || msg?.content || "").trim();
+    return fixEncoding(msg?.text || msg?.content || "").trim();
 }
 
 function getMessageMediaItems(msg) {
@@ -1196,6 +1253,7 @@ function renderMessages(data, selectedValue) {
 // Media handling
 let mediaFiles = {};
 let mediaTypes = {};
+let mediaLookup = new Map();
 let mediaPathIndex = new Set();
 let mediaBasenameIndex = new Set();
 const mediaFolderInput = document.getElementById("mediaFolder");
@@ -1238,18 +1296,19 @@ async function processMediaFiles(files) {
                 const relativePath = file.webkitRelativePath || file.name; // Preserve folder structure if available
                 mediaFiles[relativePath] = fileURL;
                 mediaTypes[relativePath] = getMediaType(file.name);
-                addMediaToIndex(relativePath);
+                addMediaToIndex(relativePath, fileURL, mediaTypes[relativePath]);
                 resolve();
             });
         }));
     }
-    console.log("Media files processed:", Object.keys(mediaFiles));
+    console.log("Media files processed:", Object.keys(mediaFiles).length);
 }
 
 function resetMedia() {
     Object.values(mediaFiles).forEach(url => URL.revokeObjectURL(url));
     mediaFiles = {};
     mediaTypes = {};
+    mediaLookup = new Map();
     mediaPathIndex = new Set();
     mediaBasenameIndex = new Set();
 }
@@ -1262,17 +1321,30 @@ function getMediaBasename(path) {
     return normalizeMediaPath(path).split("/").pop() || "";
 }
 
-function addMediaToIndex(path) {
+function addMediaToIndex(path, url, type) {
     const normalizedPath = normalizeMediaPath(path);
     const basename = getMediaBasename(path);
-    if (normalizedPath) mediaPathIndex.add(normalizedPath);
-    if (basename) mediaBasenameIndex.add(basename);
+    const entry = url ? { url, type } : null;
+    if (normalizedPath) {
+        mediaPathIndex.add(normalizedPath);
+        if (entry) mediaLookup.set(normalizedPath, entry);
+    }
+    if (basename) {
+        mediaBasenameIndex.add(basename);
+        if (entry && !mediaLookup.has(basename)) mediaLookup.set(basename, entry);
+    }
 }
 
 function isMediaReferenceFound(path) {
     const normalizedPath = normalizeMediaPath(path);
     const basename = getMediaBasename(path);
     return (normalizedPath && mediaPathIndex.has(normalizedPath)) || (basename && mediaBasenameIndex.has(basename));
+}
+
+function findMediaFile(path) {
+    const normalizedPath = normalizeMediaPath(path);
+    const basename = getMediaBasename(path);
+    return mediaLookup.get(normalizedPath) || mediaLookup.get(basename) || null;
 }
 
 function getMediaType(filename) {
@@ -1360,12 +1432,12 @@ function createMessageHTML(msg, highlightQuery) {
         <div class="message-content">
             ${text}
             ${mediaItems.map(media => {
-                const fileName = media.uri.split(/[\\\/]/).pop().toLowerCase(); // Normalize to lowercase
-                const matchingFile = Object.keys(mediaFiles).find(f => f.toLowerCase().endsWith(fileName));
-                const fileURL = matchingFile ? mediaFiles[matchingFile] : null;
+                const mediaPath = getMediaReferencePath(media);
+                const mediaFile = findMediaFile(mediaPath);
+                const fileURL = mediaFile?.url || null;
                 // Determine media type based on file extension, overriding JSON context if needed
-                const extension = fileName.split('.').pop().toLowerCase();
-                const mediaType = extension === "mp4" ? "video" : (matchingFile ? mediaTypes[matchingFile] : getMediaType(fileName));
+                const extension = mediaPath.split('.').pop().toLowerCase();
+                const mediaType = extension === "mp4" ? "video" : (mediaFile?.type || getMediaType(mediaPath));
 
                 if (mediaType === "image") {
                     return fileURL 
@@ -1428,8 +1500,8 @@ function buildSearchIndex(messages) {
         const m = messages[i];
         if (isReactionNoticeMessage(m)) continue;
         const parts = [];
-        if (m.text) parts.push(typeof m.text === 'string' ? m.text : (m.content || ''));
-        if (m.content) parts.push(m.content);
+        const messageText = getMessageText(m);
+        if (messageText) parts.push(messageText);
         if (m.senderName) parts.push(m.senderName);
         // include reactions summary
         if (m.reactions && m.reactions.length) parts.push(m.reactions.map(r => r.reaction + ' ' + (r.actor||'')).join(' '));
@@ -1530,7 +1602,7 @@ async function startSearch() {
         const time = new Date(r.item.timestamp).toLocaleString();
         // Use the original message text/content for snippet (avoid sender/reactions that were added to the index)
         const originalMsg = (window.currentChatData && window.currentChatData.messages && window.currentChatData.messages[r.item.idx]) || null;
-        const rawText = originalMsg ? (originalMsg.text || originalMsg.content || '') : (r.item.text || '');
+        const rawText = originalMsg ? getMessageText(originalMsg) : (r.item.text || '');
         const rawSnippet = String(rawText).slice(0, 240);
         const highlightedSnippet = highlightText(rawSnippet, q);
     el.innerHTML = `<div class="snippet">${highlightedSnippet}</div><div class="meta">${escapeHtml(r.item.sender)} • ${time}</div>`;
@@ -1977,8 +2049,7 @@ async function yieldToUi() {
 }
 
 function extractMessagePlainText(msg) {
-    const rawText = msg.text || msg.content || '';
-    const text = String(rawText || '').replace(/\s+/g, ' ').trim();
+    const text = getMessageText(msg).replace(/\s+/g, ' ').trim();
     const timestamp = msg.timestamp || msg.timestamp_ms || 0;
     const sender = msg.senderName || msg.sender_name || 'Unknown';
     return { sender, text, timestamp };
