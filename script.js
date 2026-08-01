@@ -995,6 +995,7 @@ function setupRadioButtons(participants) {
     const radioForm = document.getElementById("radioForm");
     radioForm.innerHTML = "";
     const saved = (storageGet('selectedPerspective') || null);
+    const isValidSaved = saved && participants.includes(saved);
     participants.forEach((participant, index) => {
         const label = document.createElement("label");
         const input = document.createElement("input");
@@ -1004,8 +1005,8 @@ function setupRadioButtons(participants) {
         input.id = `option${index + 1}`;
         input.value = participant;
         // restore saved selection if it matches, otherwise keep default on first
-        if (saved && saved === participant) input.checked = true;
-        else if (!saved && index === 0) input.checked = true;
+        if (isValidSaved && saved === participant) input.checked = true;
+        else if (!isValidSaved && index === 0) input.checked = true;
 
         // when changed, persist and re-render using current chat data (if present)
         input.addEventListener('change', () => {
@@ -1282,11 +1283,10 @@ mediaFolderInput.addEventListener("change", function(event) {
     processMediaFiles(files).then(() => {
         if (window.currentChatData) {
             updateChatInfoPanel(window.currentChatData);
-            renderMessages(window.currentChatData, 
-                document.querySelector('input[name="choice"]:checked').value);
-            loading.style.display = "none";
-            chatContainer.style.display = "block";
+            renderMessages(window.currentChatData, getSelectedPerspective());
         }
+        loading.style.display = "none";
+        chatContainer.style.display = "block";
     });
 });
 
@@ -1638,7 +1638,7 @@ async function jumpToMessage(messageIndex) {
         // find data.messages slice
         const start = chunkIndex * CHUNK_SIZE;
         const msgs = window.currentChatData.messages.slice(start, start + CHUNK_SIZE);
-        renderChunk(chunkIndex, msgs, document.querySelector('input[name="choice"]:checked').value);
+        renderChunk(chunkIndex, msgs, getSelectedPerspective());
     }
 
     // small timeout to allow DOM update
@@ -1762,8 +1762,9 @@ async function scrollAndHighlight(el) {
     el.classList.add('temporary-highlight');
     // remove temporary after animation
     setTimeout(() => { el.classList.remove('temporary-highlight'); }, 2200);
-    // ensure still visible
+    // ensure still visible if async rendering shifted things
     await new Promise(r => setTimeout(r, 300));
+    scrollIntoViewWithPadding(chatContainer, el, 120);
 }
 
 // Mark messages with data-msg-index during renderChunk
