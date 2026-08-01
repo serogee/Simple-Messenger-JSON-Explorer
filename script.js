@@ -89,6 +89,27 @@ function setSidebarWidth(width, persist = false) {
     if (persist) storageSet('sidebarWidth', String(Math.round(clamped)));
 }
 
+function getResizeGhostLine() {
+    let line = document.getElementById('resizeGhostLine');
+    if (!line) {
+        line = document.createElement('div');
+        line.id = 'resizeGhostLine';
+        line.className = 'resize-ghost-line';
+        document.body.appendChild(line);
+    }
+    return line;
+}
+
+function showResizeGhostLine(x) {
+    const line = getResizeGhostLine();
+    line.style.left = `${Math.round(x)}px`;
+    line.classList.add('active');
+}
+
+function hideResizeGhostLine() {
+    document.getElementById('resizeGhostLine')?.classList.remove('active');
+}
+
 function setupSidebarResize() {
     const handle = document.getElementById('sidebarResizeHandle');
     const container = document.querySelector('.container');
@@ -104,18 +125,23 @@ function setupSidebarResize() {
 
     let resizing = false;
     let dragOffset = 0;
+    let pendingWidth = null;
 
     const stopResize = () => {
         if (!resizing) return;
         resizing = false;
         container.classList.remove('resizing');
-        if (Number.isFinite(currentSidebarWidth)) setSidebarWidth(currentSidebarWidth, true);
+        hideResizeGhostLine();
+        if (Number.isFinite(pendingWidth)) setSidebarWidth(pendingWidth, true);
+        pendingWidth = null;
     };
 
     handle.addEventListener('pointerdown', event => {
         resizing = true;
         const handleRect = handle.getBoundingClientRect();
         dragOffset = event.clientX - (handleRect.left + handleRect.width / 2);
+        pendingWidth = currentSidebarWidth;
+        showResizeGhostLine(handleRect.left + handleRect.width / 2);
         container.classList.add('resizing');
         handle.setPointerCapture?.(event.pointerId);
         event.preventDefault();
@@ -124,7 +150,8 @@ function setupSidebarResize() {
     handle.addEventListener('pointermove', event => {
         if (!resizing) return;
         const handleCenter = event.clientX - dragOffset;
-        setSidebarWidth(handleCenter - container.getBoundingClientRect().left - handle.offsetWidth / 2);
+        pendingWidth = clampSidebarWidth(handleCenter - container.getBoundingClientRect().left - handle.offsetWidth / 2);
+        showResizeGhostLine(container.getBoundingClientRect().left + pendingWidth + handle.offsetWidth / 2);
     });
 
     handle.addEventListener('pointerup', stopResize);
@@ -147,7 +174,7 @@ setupSidebarResize();
 
 function clampInfoPanelWidth(width) {
     const viewportWidth = window.innerWidth || 1200;
-    const min = 260;
+    const min = 340;
     const max = Math.min(520, Math.max(min, viewportWidth * 0.45));
     return Math.min(max, Math.max(min, width));
 }
@@ -185,18 +212,23 @@ function setupInfoPanelControls() {
 
     let resizing = false;
     let dragOffset = 0;
+    let pendingWidth = null;
 
     const stopResize = () => {
         if (!resizing) return;
         resizing = false;
         container.classList.remove('resizing');
-        if (Number.isFinite(currentInfoPanelWidth)) setInfoPanelWidth(currentInfoPanelWidth, true);
+        hideResizeGhostLine();
+        if (Number.isFinite(pendingWidth)) setInfoPanelWidth(pendingWidth, true);
+        pendingWidth = null;
     };
 
     handle.addEventListener('pointerdown', event => {
         resizing = true;
         const handleRect = handle.getBoundingClientRect();
         dragOffset = event.clientX - (handleRect.left + handleRect.width / 2);
+        pendingWidth = currentInfoPanelWidth;
+        showResizeGhostLine(handleRect.left + handleRect.width / 2);
         container.classList.add('resizing');
         handle.setPointerCapture?.(event.pointerId);
         event.preventDefault();
@@ -206,7 +238,8 @@ function setupInfoPanelControls() {
         if (!resizing) return;
         const containerRect = container.getBoundingClientRect();
         const handleCenter = event.clientX - dragOffset;
-        setInfoPanelWidth(containerRect.right - handleCenter - handle.offsetWidth / 2 - 20);
+        pendingWidth = clampInfoPanelWidth(containerRect.right - handleCenter - handle.offsetWidth / 2 - 20);
+        showResizeGhostLine(containerRect.right - pendingWidth - handle.offsetWidth / 2 - 20);
     });
 
     handle.addEventListener('pointerup', stopResize);
@@ -241,6 +274,83 @@ function getParticipantNames(data) {
         .filter(Boolean);
 }
 
+function createAttachmentCounts() {
+    return {
+        photos: 0,
+        videos: 0,
+        audio: 0,
+        gifs: 0,
+        files: 0,
+        total: 0
+    };
+}
+
+function getMediaReferencePath(media) {
+    return String(media?.uri || media?.filename || media?.path || media?.name || "");
+}
+
+function categorizeAttachment(path, preferredType) {
+    const extension = String(path || "").split('.').pop().toLowerCase();
+    const type = preferredType || getMediaType(path || "");
+    if (type === "image") return extension === "gif" ? "gifs" : "photos";
+    if (type === "video") return "videos";
+    if (type === "audio") return "audio";
+    if (extension === "gif") return "gifs";
+    return "files";
+}
+
+function incrementAttachmentCount(counts, category) {
+    if (!counts[category]) counts[category] = 0;
+    counts[category] += 1;
+    counts.total += 1;
+}
+
+function getMessageAttachmentReferences(msg) {
+    const refs = [];
+    (msg?.photos || []).forEach(item => refs.push({ path: getMediaReferencePath(item), category: "photos" }));
+    (msg?.videos || []).forEach(item => refs.push({ path: getMediaReferencePath(item), category: "videos" }));
+    (msg?.audio || []).forEach(item => refs.push({ path: getMediaReferencePath(item), category: "audio" }));
+    (msg?.audio_files || []).forEach(item => refs.push({ path: getMediaReferencePath(item), category: "audio" }));
+    (msg?.gifs || []).forEach(item => refs.push({ path: getMediaReferencePath(item), category: "gifs" }));
+    (msg?.files || []).forEach(item => refs.push({ path: getMediaReferencePath(item), category: "files" }));
+    (msg?.media || []).forEach(item => {
+        const path = getMediaReferencePath(item);
+        refs.push({ path, category: categorizeAttachment(path) });
+    });
+    return refs;
+}
+
+function getAttachmentCounts(messages) {
+    const counts = createAttachmentCounts();
+
+    messages.forEach(msg => {
+        getMessageAttachmentReferences(msg).forEach(ref => incrementAttachmentCount(counts, ref.category));
+    });
+
+    return counts;
+}
+
+function getFoundMediaCounts(messages) {
+    const counts = createAttachmentCounts();
+    const seen = new Set();
+
+    messages.forEach(msg => {
+        getMessageAttachmentReferences(msg).forEach(ref => {
+            if (!ref.path || !isMediaReferenceFound(ref.path)) return;
+            const key = `${ref.category}:${normalizeMediaPath(ref.path)}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            incrementAttachmentCount(counts, ref.category);
+        });
+    });
+
+    return counts;
+}
+
+function formatAttachmentCount(found, reported) {
+    return `<span class="attachment-count"><span class="attachment-found">${formatInfoNumber(found)}</span><span class="attachment-separator"> / </span><span>${formatInfoNumber(reported)}</span></span>`;
+}
+
 function updateChatInfoPanel(data) {
     const content = document.getElementById('chatInfoContent');
     if (!content) return;
@@ -255,6 +365,8 @@ function updateChatInfoPanel(data) {
     const timestamps = visibleMessages.map(getMessageTimestamp).filter(timestamp => timestamp !== null);
     const createdAt = timestamps.length ? Math.min(...timestamps) : null;
     const lastMessageAt = timestamps.length ? Math.max(...timestamps) : null;
+    const reportedAttachmentCounts = getAttachmentCounts(visibleMessages);
+    const foundAttachmentCounts = getFoundMediaCounts(visibleMessages);
     const memberCounts = new Map();
 
     participants.forEach(name => memberCounts.set(name, 0));
@@ -278,6 +390,7 @@ function updateChatInfoPanel(data) {
         .join('');
 
     content.innerHTML = `
+        <div class="info-panel-label">Chat Info</div>
         <section class="info-section">
             <strong>Members</strong>
             <div class="member-list">
@@ -291,6 +404,17 @@ function updateChatInfoPanel(data) {
                 <div class="info-metric"><span>Members</span><strong>${formatInfoNumber(participants.length)}</strong></div>
                 <div class="info-row"><span>Created at</span><span>${formatInfoDate(createdAt)}</span></div>
                 <div class="info-row"><span>Last message</span><span>${formatInfoDate(lastMessageAt)}</span></div>
+            </div>
+        </section>
+        <section class="info-section">
+            <strong>Attachments</strong>
+            <div class="info-stats">
+                <div class="info-metric"><span>Total loaded</span><strong>${formatAttachmentCount(foundAttachmentCounts.total, reportedAttachmentCounts.total)}</strong></div>
+                <div class="info-row"><span>Photos</span><span>${formatAttachmentCount(foundAttachmentCounts.photos, reportedAttachmentCounts.photos)}</span></div>
+                <div class="info-row"><span>Videos</span><span>${formatAttachmentCount(foundAttachmentCounts.videos, reportedAttachmentCounts.videos)}</span></div>
+                <div class="info-row"><span>Audio</span><span>${formatAttachmentCount(foundAttachmentCounts.audio, reportedAttachmentCounts.audio)}</span></div>
+                <div class="info-row"><span>GIFs</span><span>${formatAttachmentCount(foundAttachmentCounts.gifs, reportedAttachmentCounts.gifs)}</span></div>
+                <div class="info-row"><span>Files</span><span>${formatAttachmentCount(foundAttachmentCounts.files, reportedAttachmentCounts.files)}</span></div>
             </div>
         </section>
         <section class="info-section">
@@ -794,6 +918,8 @@ function setupChatInterface(data) {
     const threadName = data.threadName || data.title || data.threadPath || "Untitled";
 
     document.getElementById("threadName").innerText = threadName;
+    const infoTitle = document.getElementById("chatInfoTitle");
+    if (infoTitle) infoTitle.innerText = threadName;
     updateChatInfoPanel(data);
     setupRadioButtons(participants);
 
@@ -1070,6 +1196,8 @@ function renderMessages(data, selectedValue) {
 // Media handling
 let mediaFiles = {};
 let mediaTypes = {};
+let mediaPathIndex = new Set();
+let mediaBasenameIndex = new Set();
 const mediaFolderInput = document.getElementById("mediaFolder");
 
 mediaFolderInput.addEventListener("change", function(event) {
@@ -1086,6 +1214,7 @@ mediaFolderInput.addEventListener("change", function(event) {
 
     processMediaFiles(files).then(() => {
         if (window.currentChatData) {
+            updateChatInfoPanel(window.currentChatData);
             renderMessages(window.currentChatData, 
                 document.querySelector('input[name="choice"]:checked').value);
             loading.style.display = "none";
@@ -1109,6 +1238,7 @@ async function processMediaFiles(files) {
                 const relativePath = file.webkitRelativePath || file.name; // Preserve folder structure if available
                 mediaFiles[relativePath] = fileURL;
                 mediaTypes[relativePath] = getMediaType(file.name);
+                addMediaToIndex(relativePath);
                 resolve();
             });
         }));
@@ -1120,6 +1250,29 @@ function resetMedia() {
     Object.values(mediaFiles).forEach(url => URL.revokeObjectURL(url));
     mediaFiles = {};
     mediaTypes = {};
+    mediaPathIndex = new Set();
+    mediaBasenameIndex = new Set();
+}
+
+function normalizeMediaPath(path) {
+    return String(path || "").replace(/\\/g, "/").toLowerCase();
+}
+
+function getMediaBasename(path) {
+    return normalizeMediaPath(path).split("/").pop() || "";
+}
+
+function addMediaToIndex(path) {
+    const normalizedPath = normalizeMediaPath(path);
+    const basename = getMediaBasename(path);
+    if (normalizedPath) mediaPathIndex.add(normalizedPath);
+    if (basename) mediaBasenameIndex.add(basename);
+}
+
+function isMediaReferenceFound(path) {
+    const normalizedPath = normalizeMediaPath(path);
+    const basename = getMediaBasename(path);
+    return (normalizedPath && mediaPathIndex.has(normalizedPath)) || (basename && mediaBasenameIndex.has(basename));
 }
 
 function getMediaType(filename) {
