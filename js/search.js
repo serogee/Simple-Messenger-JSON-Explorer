@@ -75,7 +75,15 @@ window.MessengerApp.Search = (function() {
     }
 
     function getMessageText(msg) {
-        return Parser.fixEncoding(msg?.text || msg?.content || "").trim();
+        let text = Parser.fixEncoding(msg?.text || msg?.content || "").trim();
+        const mediaItems = [].concat(msg.media || [], msg.photos || [], msg.videos || [], msg.audio || [], msg.audio_files || [], msg.gifs || [], msg.files || []);
+        mediaItems.forEach(mi => {
+            if (mi && mi.uri) {
+                const filename = String(mi.uri).split('/').pop();
+                text += (text ? " " : "") + filename;
+            }
+        });
+        return text;
     }
 
     function buildSearchIndex(messages) {
@@ -83,14 +91,8 @@ window.MessengerApp.Search = (function() {
         for (let i = 0; i < messages.length; i++) {
             const m = messages[i];
             if (Renderer.isReactionNoticeMessage(m)) continue;
-            const parts = [];
-            const messageText = getMessageText(m);
-            if (messageText) parts.push(messageText);
-            if (m.senderName) parts.push(m.senderName);
-            if (m.reactions && m.reactions.length) parts.push(m.reactions.map(r => r.reaction + ' ' + (r.actor||'')).join(' '));
-            const mediaItems = [].concat(m.media || [], m.photos || [], m.videos || [], m.audio || [], m.audio_files || [], m.gifs || []);
-            mediaItems.forEach(mi => { if (mi && mi.uri) parts.push(mi.uri); });
-            const text = parts.join(' ');
+            
+            const text = getMessageText(m);
             idx.push({ text, normalized: normalizeForSearch(text), sender: m.senderName || m.sender_name || 'Unknown', timestamp: m.timestamp || m.timestamp_ms || 0, idx: i });
         }
         return idx;

@@ -108,6 +108,13 @@ window.MessengerApp.Renderer = (function() {
         return `<span class="reaction-item"${attrs}>${actor}: ${value}</span>`;
     }
 
+    function findNextVisibleMessageIndex(messages, fromIndex) {
+        for (let i = fromIndex + 1; i < messages.length; i++) {
+            if (!isReactionNoticeMessage(messages[i])) return i;
+        }
+        return -1;
+    }
+
     function updateChatInfoPanel(data) {
         const content = document.getElementById('chatInfoContent');
         if (!content) return;
@@ -180,7 +187,7 @@ window.MessengerApp.Renderer = (function() {
         `;
     }
 
-    function createMessageHTML(msg, highlightQuery) {
+    function createMessageHTML(msg, highlightQuery, isFirstInClump = true) {
         const sender = msg.senderName || msg.sender_name || "Unknown";
         const rawText = Parser.fixEncoding(msg?.text || msg?.content || "").trim();
         // Fallback search highlight logic: search.js overrides this with actual highlight logic if present
@@ -191,36 +198,65 @@ window.MessengerApp.Renderer = (function() {
         const timestamp = msg.timestamp || msg.timestamp_ms || 0;
         const mediaItems = Media.getMessageMediaItems(msg);
 
-        return `
-            <div class="sender-name">${Utils.escapeHtml(sender)}</div>
-            <div class="message-content">
-                ${text}
-                ${mediaItems.map(media => {
-                    const mediaPath = Media.getMediaReferencePath(media);
-                    const mediaFile = Media.findMediaFile(mediaPath);
-                    const fileURL = mediaFile?.url || null;
-                    const extension = mediaPath.split('.').pop().toLowerCase();
-                    const mediaType = extension === "mp4" ? "video" : (mediaFile?.type || Media.getMediaType(mediaPath));
+        let reactionsHtml = "";
+        if (msg.reactions && msg.reactions.length > 0) {
+            const uniqueEmojis = Array.from(new Set(msg.reactions.map(r => r.reaction))).slice(0, 3);
+            
+            reactionsHtml = `
+                <div class="reaction-bubble" title="Click to view reactions">
+                    ${uniqueEmojis.map(emoji => `<span class="reaction-emoji-simple">${Utils.escapeHtml(emoji)}</span>`).join("")}
+                    ${msg.reactions.length > 1 ? `<span class="reaction-count">${msg.reactions.length}</span>` : ""}
+                    <div class="reaction-popover">
+                        ${msg.reactions.slice(0, 5).map(r => {
+                            const ts = getReactionTimestamp(r);
+                            const timeText = ts ? new Date(ts).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "";
+                            const actor = Utils.escapeHtml(r.actor || "");
+                            const reaction = Utils.escapeHtml(r.reaction || "");
+                            const cls = timeText ? "popover-actor has-time-info" : "popover-actor";
+                            return `
+                                <div class="reaction-popover-item" ${timeText ? `title="${Utils.escapeHtml(timeText)}"` : ""}>
+                                    <span class="popover-emoji">${reaction}</span>
+                                    <span class="${cls}">${actor}</span>
+                                </div>
+                            `;
+                        }).join("")}
+                    </div>
+                </div>
+            `;
+        }
 
-                    if (mediaType === "image") {
-                        return fileURL 
-                            ? `<a href="${fileURL}" target="_blank" class="media-preview"><img src="${fileURL}" alt="Image" class="preview"></a>`
-                            : `[ Image not found ]`;
-                    } else if (mediaType === "video") {
-                        return fileURL
-                            ? `<a href="${fileURL}" target="_blank" class="media-preview"><video controls class="preview-video"><source src="${fileURL}" type="video/mp4"></video></a>`
-                            : `[ Video not found ]`;
-                    } else if (mediaType === "audio") {
-                        return fileURL
-                            ? `<audio controls><source src="${fileURL}" type="audio/mpeg"></audio>`
-                            : `[ Audio not found ]`;
-                    }
-                    return `[ Media not found ]`;
-                }).join("")}
-                ${msg.reactions?.length ? `<div class="reaction">${msg.reactions.map(formatReaction).join(", ")}</div>` : ""}
-                <div class="msg-timestamp">${new Date(timestamp).toLocaleString([], {dateStyle: 'short', timeStyle: 'short'})}</div>
-            </div>
-        `;
+        let contentHtml = '<div class="message-content">';
+        if (text) contentHtml += `<span style="white-space: pre-wrap;">${text}</span>`;
+        if (mediaItems.length) {
+            contentHtml += mediaItems.map(media => {
+                const mediaPath = Media.getMediaReferencePath(media);
+                const mediaFile = Media.findMediaFile(mediaPath);
+                const fileURL = mediaFile?.url || null;
+                const extension = mediaPath.split('.').pop().toLowerCase();
+                const mediaType = extension === "mp4" ? "video" : (mediaFile?.type || Media.getMediaType(mediaPath));
+
+                if (mediaType === "image") {
+                    return fileURL 
+                        ? `<a href="${fileURL}" target="_blank" class="media-preview"><img src="${fileURL}" alt="Image" class="preview"></a>`
+                        : `[ Image not found ]`;
+                } else if (mediaType === "video") {
+                    return fileURL
+                        ? `<a href="${fileURL}" target="_blank" class="media-preview"><video controls class="preview-video"><source src="${fileURL}" type="video/mp4"></video></a>`
+                        : `[ Video not found ]`;
+                } else if (mediaType === "audio") {
+                    return fileURL
+                        ? `<audio controls><source src="${fileURL}" type="audio/mpeg"></audio>`
+                        : `[ Audio not found ]`;
+                }
+                const filename = mediaPath.split('/').pop() || 'File attachment';
+                return fileURL
+                    ? `<a href="${fileURL}" target="_blank" class="media-file-link">📎 ${Utils.escapeHtml(filename)}</a>`
+                    : `<span class="placeholder media-file-link">📎 [ ${Utils.escapeHtml(filename)} not found ]</span>`;
+            }).join("");
+        }
+        if (reactionsHtml) contentHtml += reactionsHtml;
+        contentHtml += `<div class="msg-timestamp">${new Date(timestamp).toLocaleString([], {dateStyle: 'short', timeStyle: 'short'})}</div></div>`;
+        return contentHtml;
     }
 
     function findPreviousVisibleMessageIndex(messages, fromIndex) {
@@ -294,13 +330,55 @@ window.MessengerApp.Renderer = (function() {
                 chunkContainer.appendChild(sep);
             }
 
-            const div = document.createElement("div");
             const sender = msg.senderName || msg.sender_name || "Unknown";
+            
+            let isFirstInClump = true;
+            let isLastInClump = true;
+
+            if (globalIdx > 0 && !showSeparator) {
+                const prevIdx = findPreviousVisibleMessageIndex(State.currentChatData.messages, globalIdx);
+                const prevMsg = prevIdx >= 0 ? State.currentChatData.messages[prevIdx] : null;
+                const prevSender = prevMsg ? (prevMsg.senderName || prevMsg.sender_name || "Unknown") : null;
+                if (prevSender === sender) {
+                    isFirstInClump = false;
+                }
+            }
+
+            const nextIdx = findNextVisibleMessageIndex(State.currentChatData.messages, globalIdx);
+            const nextMsg = nextIdx >= 0 ? State.currentChatData.messages[nextIdx] : null;
+            if (nextMsg) {
+                const currTime = msg.timestamp || msg.timestamp_ms || 0;
+                const nextTime = nextMsg.timestamp || nextMsg.timestamp_ms || 0;
+                const nextShowSeparator = Math.abs(nextTime - currTime) > 10 * 60 * 1000;
+                const nextSender = nextMsg.senderName || nextMsg.sender_name || "Unknown";
+                if (nextSender === sender && !nextShowSeparator) {
+                    isLastInClump = false;
+                }
+            }
+
+            const wrapper = document.createElement("div");
+            wrapper.classList.add("message-wrapper");
+            wrapper.classList.add(sender === selectedValue ? "from-me-wrapper" : "from-them-wrapper");
+
+            const div = document.createElement("div");
             div.classList.add("message", sender === selectedValue ? "from-me" : "from-them");
+            if (isFirstInClump) div.classList.add("clump-first");
+            if (isLastInClump) div.classList.add("clump-last");
+            if (msg.reactions && msg.reactions.length > 0) div.classList.add("has-reactions");
+
             div.dataset.msgIndex = globalIdx;
             try { div.__rawMessage = msg; } catch(e) { /* ignore */ }
-            div.innerHTML = createMessageHTML(msg, highlightQuery);
-            chunkContainer.appendChild(div);
+            div.innerHTML = createMessageHTML(msg, highlightQuery, isFirstInClump);
+            
+            if (isFirstInClump && sender !== selectedValue) {
+                const senderDiv = document.createElement("div");
+                senderDiv.className = "sender-name";
+                senderDiv.innerText = sender;
+                wrapper.appendChild(senderDiv);
+            }
+            
+            wrapper.appendChild(div);
+            chunkContainer.appendChild(wrapper);
         });
 
         State.renderedMessages.set(chunkIndex, true);

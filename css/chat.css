@@ -30,15 +30,34 @@
 .message-chunk { min-height:100px; }
 
 /* Messages */
-.message { position:relative; margin:5px; padding:10px 15px; border-radius:15px; max-width:50%; width:fit-content; word-break:break-word; overflow-wrap:break-word; }
-.from-me { background:var(--me-bg); color:var(--me-text); text-align:left; margin-left:auto; }
-.from-them { background:var(--them-bg); color:var(--text); text-align:left; margin-right:auto; }
-.sender-name { font-weight:bold; margin-bottom:5px; }
-.from-me .sender-name { color:var(--me-text); display:none; }
-.from-them .sender-name { color:var(--text); margin-right:10px; }
+.message-wrapper { display: flex; flex-direction: column; width: 100%; margin-bottom: 2px; }
+.from-me-wrapper { align-items: flex-end; }
+.from-them-wrapper { align-items: flex-start; }
+
+.message { position:relative; margin:2px 5px; padding:10px 15px; border-radius:18px; max-width:50%; word-break:break-word; overflow-wrap:break-word; }
+.message.clump-first { margin-top: 6px; }
+.message.clump-last { margin-bottom: 6px; }
+
+.from-me { background:var(--me-bg); color:var(--me-text); text-align:left; }
+.from-me:not(.clump-first) { border-top-right-radius: 4px; }
+.from-me:not(.clump-last) { border-bottom-right-radius: 4px; }
+
+.from-them { background:var(--them-bg); color:var(--text); text-align:left; }
+.from-them:not(.clump-first) { border-top-left-radius: 4px; }
+.from-them:not(.clump-last) { border-bottom-left-radius: 4px; }
+
+.sender-name { font-size: 12px; font-weight: normal; color: var(--muted); margin-bottom: 4px; padding: 0 12px; }
+.from-me-wrapper .sender-name { display:none; }
+.from-them-wrapper .sender-name { margin-left: 2px; }
+
 .message-content { line-height:1.4; }
 .from-me .message-content { color:var(--me-text); }
 .from-them .message-content { color:var(--text); }
+.msg-unsent {
+    font-style: italic;
+    opacity: 0.55;
+    font-size: 0.92em;
+}
 
 /* Message Hover Timestamp */
 .msg-timestamp {
@@ -71,42 +90,130 @@
     font-weight: 500;
 }
 
-/* Reactions */
-.reaction { font-size:14px; margin-top:5px; text-align:right; }
-.reaction-item[data-reaction-time] {
-    position:relative;
-    cursor:help;
-    text-decoration:underline dotted currentColor;
-    text-underline-offset:3px;
+.message.has-reactions { margin-bottom: 16px; }
+.message.clump-last.has-reactions { margin-bottom: 20px; }
+
+/* Reactions (Floating Bubble) */
+.reaction-bubble {
+    position: absolute;
+    bottom: -14px;
+    right: 8px; /* Always on the right edge */
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 999px; /* Pill shape */
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 15px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    z-index: 10;
+    cursor: default;
+    user-select: none;
 }
-.reaction-item[data-reaction-time]::after {
-    content:attr(data-reaction-time);
-    position:absolute;
-    right:0;
-    bottom:calc(100% + 6px);
-    z-index:10;
-    padding:4px 7px;
-    border-radius:6px;
-    background:rgba(17,24,39,0.94);
-    color:#fff;
-    font-size:12px;
-    line-height:1.2;
-    white-space:nowrap;
-    opacity:0;
-    transform:translateY(3px);
-    pointer-events:none;
-    transition:opacity 0.15s ease, transform 0.15s ease;
+.from-them .reaction-bubble {
+    right: 8px; /* Always on the right side as requested */
+    left: auto;
 }
-.reaction-item[data-reaction-time]:hover::after {
-    opacity:1;
-    transform:translateY(0);
+.reaction-emoji-simple {
+    display: inline-block;
+    line-height: 1;
+}
+.reaction-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--muted);
+    margin-left: 2px;
+}
+
+/* Reaction Popover */
+.reaction-popover {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 4px);
+    right: 0;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    flex-direction: column;
+    gap: 4px;
+    min-width: 140px;
+    max-height: 160px; /* ~5 items */
+    overflow-y: auto;
+    z-index: 20;
+    cursor: default;
+}
+.reaction-bubble:hover .reaction-popover {
+    display: flex;
+}
+.reaction-bubble::before {
+    content: '';
+    position: absolute;
+    top: -16px;
+    left: 0;
+    width: 100%;
+    height: 32px;
+    background: transparent;
+    z-index: 1;
+}
+.reaction-popover-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.reaction-popover-item:hover {
+    background: var(--hover-overlay);
+}
+.popover-emoji {
+    font-size: 16px;
+}
+.popover-actor {
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.popover-actor.has-time-info {
+    text-decoration: underline dotted var(--muted);
+    text-underline-offset: 3px;
+    cursor: help;
 }
 
 /* Media */
-.placeholder { width:150px; height:60px; display:flex; align-items:center; justify-content:center; border-radius:10px; background:#ddd; color:#555; transition:all .2s ease; }
+.placeholder { width:150px; height:60px; display:flex; align-items:center; justify-content:center; border-radius:10px; background:var(--hover-overlay); color:var(--muted); transition:all .2s ease; font-size: 13px; text-align: center; }
 .preview:hover { transform: scale(1.05); }
 .preview-video, .preview { max-width:250px; max-height:300px; }
 img, video { max-width:100%; border-radius:10px; margin:5px; cursor:pointer; transition:all .3s ease; object-fit:cover; }
+
+.media-file-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--hover-overlay);
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    font-weight: 500;
+    margin: 4px 0;
+    font-size: 14px;
+    border: 1px solid var(--border);
+    word-break: break-all;
+    box-sizing: border-box;
+}
+.media-file-link:hover {
+    background: var(--border);
+}
+.placeholder.media-file-link {
+    width: auto;
+    height: auto;
+    text-align: left;
+}
 
 /* Date Navigation */
 .date-nav-controls {

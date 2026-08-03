@@ -93,7 +93,8 @@ window.MessengerApp.Media = (function() {
             msg?.videos || [],
             msg?.audio || [],
             msg?.audio_files || [],
-            msg?.gifs || []
+            msg?.gifs || [],
+            msg?.files || []
         );
     }
 

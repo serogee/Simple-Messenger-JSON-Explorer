@@ -156,7 +156,7 @@ window.MessengerApp.Main = (function() {
             setupChatInterface(data);
         } catch (error) {
             console.error(error);
-            alert("Invalid JSON file!");
+            alert("Invalid JSON file! Error: " + (error.stack || error.message || error));
             loading.style.display = "none";
         }
     }
@@ -321,6 +321,8 @@ window.MessengerApp.Main = (function() {
             State.renderedMessages.clear();
             try { if (State.pdfState.blobUrl) URL.revokeObjectURL(State.pdfState.blobUrl); } catch(e) {}
         });
+
+        UI.setupReactionModal();
     }
 
     return {

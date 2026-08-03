@@ -250,10 +250,84 @@ window.MessengerApp.UI = (function() {
         setTimeout(() => { try { trustClose.focus(); } catch(e){} }, 60);
     }
 
+    function setupReactionModal() {
+        const chatContainer = document.getElementById('chat');
+        const modal = document.getElementById('reactionModal');
+        const closeBtn = document.getElementById('reactionModalClose');
+        const tabsContainer = document.getElementById('reactionModalTabs');
+        const listContainer = document.getElementById('reactionModalList');
+        
+        if (!chatContainer || !modal || !closeBtn || !tabsContainer || !listContainer) return;
+        
+        const closeModal = () => {
+            modal.setAttribute('aria-hidden', 'true');
+        };
+        
+        closeBtn.addEventListener('click', closeModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeModal();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.getAttribute('aria-hidden') === 'false') closeModal();
+        });
+
+        chatContainer.addEventListener('click', (e) => {
+            const bubble = e.target.closest('.reaction-bubble');
+            if (!bubble) return;
+            const messageEl = bubble.closest('.message');
+            if (!messageEl) return;
+            const rawMessage = messageEl.__rawMessage;
+            if (!rawMessage || !rawMessage.reactions || !rawMessage.reactions.length) return;
+            
+            renderReactionModalContent(rawMessage.reactions);
+            modal.setAttribute('aria-hidden', 'false');
+        });
+
+        function renderReactionModalContent(reactions, activeTab = 'All') {
+            const counts = {};
+            const uniqueEmojis = new Set();
+            reactions.forEach(r => {
+                counts[r.reaction] = (counts[r.reaction] || 0) + 1;
+                uniqueEmojis.add(r.reaction);
+            });
+            const emojis = Array.from(uniqueEmojis);
+            
+            let tabsHtml = `<button class="reaction-tab ${activeTab === 'All' ? 'active' : ''}" data-tab="All">All ${reactions.length}</button>`;
+            emojis.forEach(emoji => {
+                tabsHtml += `<button class="reaction-tab ${activeTab === emoji ? 'active' : ''}" data-tab="${Utils.escapeHtml(emoji)}">${Utils.escapeHtml(emoji)} ${counts[emoji]}</button>`;
+            });
+            tabsContainer.innerHTML = tabsHtml;
+            
+            tabsContainer.querySelectorAll('.reaction-tab').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    renderReactionModalContent(reactions, btn.dataset.tab);
+                });
+            });
+            
+            const filteredReactions = activeTab === 'All' ? reactions : reactions.filter(r => r.reaction === activeTab);
+            let listHtml = '';
+            filteredReactions.forEach(r => {
+                const ts = r.timestamp || r.timestamp_ms || r.__timestamp || 0;
+                const timeText = ts ? new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+                listHtml += `
+                    <div class="reaction-modal-item">
+                        <span class="modal-emoji">${Utils.escapeHtml(r.reaction)}</span>
+                        <div class="modal-actor-info">
+                            <span class="modal-actor">${Utils.escapeHtml(r.actor)}</span>
+                            ${timeText ? `<span class="modal-time">${Utils.escapeHtml(timeText)}</span>` : ''}
+                        </div>
+                    </div>
+                `;
+            });
+            listContainer.innerHTML = listHtml;
+        }
+    }
+
     return {
         setupSidebarResize,
         setupInfoPanelControls,
         setupThemeAndSettings,
-        showTrustModalIfNeeded
+        showTrustModalIfNeeded,
+        setupReactionModal
     };
 })();
