@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Messenger JSON Guide | Simple Messenger JSON Explorer</title>
+    <meta name="description" content="Open your Facebook Messenger JSON exports, combine split message files, and find missing photos. Follow the guide for Simple Messenger JSON Explorer.">
+    <link rel="canonical" href="https://serogee.github.io/Simple-Messenger-JSON-Explorer/guide.html">
+    <link rel="icon" href="./assets/icon.png" type="image/png">
+    <link rel="stylesheet" href="./css/variables.css">
+    <link rel="stylesheet" href="./css/reset.css">
+    <link rel="stylesheet" href="./css/guide.css">
+</head>
+<body>
+    <header class="guide-header">
+        <a href="./">Simple Messenger JSON Explorer</a>
+        <nav aria-label="Main navigation">
+            <a href="./">Open the viewer</a>
+            <a href="https://github.com/serogee/Simple-Messenger-JSON-Explorer">Source code</a>
+        </nav>
+    </header>
+    <main class="guide-content">
+        <h1>Open your Messenger JSON exports</h1>
+        <p>Use Simple Messenger JSON Explorer to read your Facebook Messenger exports in a chat view. You can search for a phrase, jump to a date, and browse attachments. You work with files on your device without uploading your conversations.</p>
+
+        <nav class="guide-contents" aria-label="Guide sections">
+            <a href="#download">Download your export</a>
+            <a href="#open">Open a conversation</a>
+            <a href="#media">Add photos and other media</a>
+            <a href="#troubleshooting">Fix common problems</a>
+        </nav>
+
+        <section id="download">
+            <h2>Download your export</h2>
+            <p>Request your message history in JSON format through Facebook or Messenger. After you download the archive, extract the ZIP file into a folder on your device.</p>
+            <p>Follow Meta's instructions for your export type:</p>
+            <ul>
+                <li><a href="https://www.facebook.com/help/212802592074644">Download your Facebook information</a></li>
+                <li><a href="https://www.facebook.com/help/messenger-app/677912386869109">Download your Messenger end-to-end encrypted chats</a></li>
+            </ul>
+        </section>
+
+        <section id="open">
+            <h2>Open a conversation</h2>
+            <p><a href="./">Open the viewer</a> and use the file picker under <strong>Select one or more Messenger JSON files to view</strong>. Choose the JSON files for one conversation.</p>
+            <p>For a split export, select <code>message_1.json</code>, <code>message_2.json</code>, and the other numbered message files from that conversation in one selection. You can read the combined history in date order. Keep files from different conversations in separate selections.</p>
+            <p>Choose a participant under <strong>View from the perspective of</strong>. Use <strong>Search messages</strong> to find an exact phrase, or use the date controls to browse by month, week, or day.</p>
+        </section>
+
+        <section id="media">
+            <h2>Add photos and other media</h2>
+            <p>Use the second file picker, under <strong>Optional: allow access to a separate MEDIA folder</strong>, to select the folder with the conversation's attachments.</p>
+            <ul>
+                <li>For a standard Facebook export, select the conversation folder that contains the JSON and media files.</li>
+                <li>For an encrypted Messenger export with a separate media folder, select that media folder.</li>
+            </ul>
+            <p>Keep the exported media filenames intact so you can match attachments to the references in your JSON files.</p>
+        </section>
+
+        <section id="troubleshooting">
+            <h2>Fix common problems</h2>
+            <h3>Missing photos or videos</h3>
+            <p>Extract the archive before you select a media folder. Check that you chose the folder for the same conversation and that it contains the missing files. If your export lacks an attachment, request a new export with media included.</p>
+            <h3>Missing messages</h3>
+            <p>Select the split JSON files for the conversation in one selection. Check the date range you requested from Meta if you still cannot find older messages.</p>
+            <h3>Invalid JSON or an empty conversation</h3>
+            <p>Choose a message JSON file from the extracted archive. If you downloaded HTML, request a JSON export. Open the JSON in a text editor and check for a <code>messages</code> list with entries. You cannot display a conversation from an account settings file.</p>
+        </section>
+
+        <section>
+            <h2>Privacy and PDF export</h2>
+            <p>You can inspect the <a href="https://github.com/serogee/Simple-Messenger-JSON-Explorer">source code</a> or download a copy to run on your computer. You read your selected message and media files in your browser without sending them to an upload service.</p>
+            <p>To save a PDF, choose <strong>Export to PDF</strong> after you load a conversation. Review the preview before downloading. Treat PDF export as experimental: you may see layout differences or missing media in the result.</p>
+        </section>
+        <p class="guide-return"><a href="./">Open Simple Messenger JSON Explorer</a></p>
+    </main>
+</body>
+</html>

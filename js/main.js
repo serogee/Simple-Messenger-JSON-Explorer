@@ -140,6 +140,7 @@ window.MessengerApp.Main = (function() {
         const chatContainer = document.getElementById("chat");
 
         options.style.display = "block";
+        document.getElementById("welcomePanel").hidden = true;
         loading.innerHTML = "Loading...";
         loading.style.display = "flex";
         chatContainer.scrollTop = 0;
@@ -158,6 +159,7 @@ window.MessengerApp.Main = (function() {
             console.error(error);
             alert("Invalid JSON file! Error: " + (error.stack || error.message || error));
             loading.style.display = "none";
+            document.getElementById("welcomePanel").hidden = false;
         }
     }
 

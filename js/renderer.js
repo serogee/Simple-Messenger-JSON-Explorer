@@ -594,6 +594,7 @@ window.MessengerApp.Renderer = (function() {
     }
 
     function renderMessages(data, selectedValue) {
+        document.getElementById("welcomePanel").hidden = true;
         const chatContainer = document.getElementById("chat");
         const loading = document.getElementById("loading");
         chatContainer.style.display = "none";

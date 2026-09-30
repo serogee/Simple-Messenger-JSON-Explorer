@@ -5,7 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simple Messenger JSON Explorer</title>
-    <link rel="icon" href="./assets/icon.png" type="image/x-icon">
+    <meta name="description" content="Read and search your Facebook Messenger JSON exports in your browser. Combine split conversations and browse media without uploading your message files.">
+    <link rel="canonical" href="https://serogee.github.io/Simple-Messenger-JSON-Explorer/">
+    <link rel="icon" href="./assets/icon.png" type="image/png">
     <link rel="stylesheet" href="css/variables.css">
     <link rel="stylesheet" href="css/reset.css">
     <link rel="stylesheet" href="css/layout.css">
@@ -20,11 +22,11 @@
         <div class="sub-container">
             <div class="title-row">
                 <div class="title-text">
-                    <strong>Simple Messenger JSON Explorer</strong>
-                    <br>
+                    <h1>Simple Messenger JSON Explorer</h1>
                     <small class="footer">
                         Fork by serogee |
                         <a href="https://github.com/serogee/Simple-Messenger-JSON-Explorer" target="_blank">Src & Usage</a>
+                        | <a href="./guide.html" target="_blank" rel="noopener">Usage guide</a>
                     </small>
                 </div>
                 <!-- settings button placed here so it stays outside the scrollable area -->
@@ -149,8 +151,20 @@
                 <div id="dateNavTrack" class="date-nav-track" aria-label="Conversation dates"></div>
             </div>
             <div id="line"></div>
+            <section id="welcomePanel" class="welcome-panel" aria-labelledby="welcomeTitle">
+                <h2 id="welcomeTitle">Read your Messenger exports</h2>
+                <p>Use this free Facebook Messenger JSON viewer to read and search your exported conversations. You can combine split message files and browse photos, videos, and audio.</p>
+                <ol>
+                    <li>Download your Messenger data in JSON format and extract the ZIP archive.</li>
+                    <li>Select the message JSON files for one conversation. Include split files such as <code>message_1.json</code> and <code>message_2.json</code>.</li>
+                    <li>Select the matching media folder to view attachments.</li>
+                </ol>
+                <p>You read your messages in your browser without uploading the files.</p>
+                <a href="./guide.html" target="_blank" rel="noopener">Read the setup and troubleshooting guide</a>
+                <noscript><p>Enable JavaScript to open your message files. You can read the usage guide without JavaScript.</p></noscript>
+            </section>
             <div id="chat"></div>
-            <div id="loading">No data available</div>
+            <div id="loading" role="status" style="display:none"></div>
         </div>
 
         <div id="infoResizeHandle" class="info-resize-handle" role="separator" aria-orientation="vertical" aria-label="Resize info panel" tabindex="0"></div>
